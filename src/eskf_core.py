@@ -235,6 +235,7 @@ class ESKFCore:
         self.P = F @ self.P @ F.T + self.Q * dt
 
         # 7. Covariance hardening & health
+        self._step_count += 1
         self._harden_covariance()
         self._check_health()
 
@@ -425,7 +426,7 @@ class ESKFCore:
 
         # Eigenvalue bounding
         min_eigenvalue = 1e-9
-        max_eigenvalue = 1e4
+        max_eigenvalue = 1e7
         eigvals, eigvecs = np.linalg.eigh(self.P)
 
         if np.any(eigvals < min_eigenvalue) or np.any(eigvals > max_eigenvalue):
@@ -494,8 +495,11 @@ class ESKFCore:
                 self._health = EKFHealth.FAULT
                 return
 
+        # Convergence logic based on time (step count)
         if self._step_count > 200:
             self._health = EKFHealth.HEALTHY
+        else:
+            self._health = EKFHealth.CONVERGING
 
     # ── Quaternion Utilities ───────────────────────────────────
 

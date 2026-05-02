@@ -28,6 +28,7 @@ from dead_reckon      import DeadReckon
 from safety_monitor   import SafetyMonitor, SafetyAction
 from loop_monitor     import LoopMonitor
 from ins_logger       import INSLogger
+from structured_logger import StructuredLogger
 from adaptive_pid     import AdaptivePID
 from optical_flow_ins import OpticalFlowINS
 
@@ -79,6 +80,7 @@ class INSNavigationSystem:
         self.eskf   = ESKFCore(self.noise)
         self.dr     = DeadReckon(self.noise)
         self.logger = INSLogger("logs/ins_data.csv")
+        self.s_logger = StructuredLogger("logs")
         self.bridge = MAVLinkBridge(connection_string, baud)
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
@@ -136,6 +138,7 @@ class INSNavigationSystem:
         finally:
             self.bridge.close()
             self.logger.close()
+            self.s_logger.close()
             self.loop_monitor.print_histogram()
             self._print_final_stats()
 
@@ -329,6 +332,16 @@ class INSNavigationSystem:
         flow_pos, flow_vel = self.optical_flow.get_state()
         self.logger.write(elapsed, pos, vel, att, self.eskf.P,
                           pi_temp, flow_vel, pid_gains)
+
+        # Structured log
+        self.s_logger.log_state(
+            t=elapsed,
+            state=self.eskf.state,
+            covariance=self.eskf.P,
+            health_status=self.eskf.health.name,
+            safety_action=self.safety.last_action.name,
+            timing_ms=self.time_sync.latency_s * 1000.0
+        )
 
     def _print_state(self, t: float):
         elapsed = t - self._start_time
