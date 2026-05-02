@@ -232,11 +232,8 @@ class ESKFCore:
         F = self._compute_F(accel, gyro, R, dt)
         self.P = F @ self.P @ F.T + self.Q * dt
 
-        # 7. Periodic health checks
-        self._step_count += 1
-        if self._step_count % self.SYMMETRY_INTERVAL == 0:
-            self.P = (self.P + self.P.T) / 2.0
-
+        # 7. Covariance hardening & health
+        self._harden_covariance()
         self._check_health()
 
     def _compute_F(self, accel, gyro, R, dt) -> np.ndarray:
@@ -296,7 +293,10 @@ class ESKFCore:
         K = self.P @ self.H_baro.T @ np.linalg.inv(S)
         dx = (K @ y).flatten()
         self._inject_error(dx)
-        self.P = (np.eye(15) - K @ self.H_baro) @ self.P
+
+        # Joseph form covariance update
+        I_KH = np.eye(15) - K @ self.H_baro
+        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
 
     def update_mag(self, yaw_measured: float, mag_norm: float = -1.0,
                    t_now: float = 0.0):
@@ -342,7 +342,10 @@ class ESKFCore:
         K = self.P @ self.H_mag.T @ np.linalg.inv(S)
         dx = (K @ y).flatten()
         self._inject_error(dx)
-        self.P = (np.eye(15) - K @ self.H_mag) @ self.P
+        
+        # Joseph form covariance update
+        I_KH = np.eye(15) - K @ self.H_mag
+        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
 
     def update_optical_flow(self, flow_vx: float, flow_vy: float,
                             distance: float, quality: int):
@@ -373,7 +376,10 @@ class ESKFCore:
         K = self.P @ H_flow.T @ np.linalg.inv(S)
         dx = (K @ y).flatten()
         self._inject_error(dx)
-        self.P = (np.eye(15) - K @ H_flow) @ self.P
+        
+        # Joseph form covariance update
+        I_KH = np.eye(15) - K @ H_flow
+        self.P = I_KH @ self.P @ I_KH.T + K @ R_flow @ K.T
 
     # ── Error Injection ────────────────────────────────────────
 
@@ -400,6 +406,27 @@ class ESKFCore:
 
     # ── Health Monitoring ──────────────────────────────────────
 
+    def _harden_covariance(self):
+        """
+        Force symmetry and bound eigenvalues to ensure positive-definiteness.
+        Must be called after updates/predict to prevent numerical divergence.
+        """
+        # Enforce symmetry
+        self.P = (self.P + self.P.T) / 2.0
+
+        # Eigenvalue bounding
+        min_eigenvalue = 1e-9
+        max_eigenvalue = 1e4
+        eigvals, eigvecs = np.linalg.eigh(self.P)
+
+        if np.any(eigvals < min_eigenvalue) or np.any(eigvals > max_eigenvalue):
+            # Clamp eigenvalues
+            eigvals = np.clip(eigvals, min_eigenvalue, max_eigenvalue)
+            # Reconstruct P
+            self.P = eigvecs @ np.diag(eigvals) @ eigvecs.T
+            # Re-enforce symmetry
+            self.P = (self.P + self.P.T) / 2.0
+
     def _check_health(self):
         vel_norm = np.linalg.norm(self.x[3:6])
         q = self.x[6:10]
@@ -418,6 +445,16 @@ class ESKFCore:
         if np.any(np.isnan(self.P)) or np.any(np.isinf(self.P)):
             self._health = EKFHealth.FAULT
             log.critical("ESKF FAULT: NaN/Inf in covariance")
+            return
+
+        # Condition number
+        try:
+            cond_num = np.linalg.cond(self.P)
+            if cond_num > 1e8:
+                log.warning(f"Covariance poorly conditioned: {cond_num:.2e}")
+        except np.linalg.LinAlgError:
+            self._health = EKFHealth.FAULT
+            log.critical("ESKF FAULT: Covariance singular")
             return
 
         # Fault conditions
