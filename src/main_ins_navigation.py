@@ -26,6 +26,7 @@ from eskf_core        import ESKFCore, EKFHealth
 from imu_noise_params import IMUNoiseParams
 from dead_reckon      import DeadReckon
 from safety_monitor   import SafetyMonitor, SafetyAction
+from loop_monitor     import LoopMonitor
 from ins_logger       import INSLogger
 from adaptive_pid     import AdaptivePID
 from optical_flow_ins import OpticalFlowINS
@@ -98,9 +99,7 @@ class INSNavigationSystem:
         self._start_time  = None
 
         # Timing diagnostics
-        self._loop_times   = []
-        self._max_loop_ms  = 0.0
-        self._overrun_count = 0
+        self.loop_monitor = LoopMonitor(target_dt=self.dt)
 
         # Initialization buffer
         self._init_accel_buf = []
@@ -137,6 +136,7 @@ class INSNavigationSystem:
         finally:
             self.bridge.close()
             self.logger.close()
+            self.loop_monitor.print_histogram()
             self._print_final_stats()
 
     # ── main loop ──────────────────────────────────────────────
@@ -177,16 +177,7 @@ class INSNavigationSystem:
 
             # ── loop timing ────────────────────────────────────
             loop_ms = (time.monotonic() - loop_start) * 1000.0
-            self._loop_times.append(loop_ms)
-            if len(self._loop_times) > 1000:
-                self._loop_times = self._loop_times[-500:]
-            if loop_ms > self._max_loop_ms:
-                self._max_loop_ms = loop_ms
-            if loop_ms > self.dt * 2000:  # 2x expected period
-                self._overrun_count += 1
-                if self._overrun_count % 100 == 1:
-                    log.warning(f"Loop overrun: {loop_ms:.1f} ms "
-                                f"(expected <{self.dt*1000:.0f} ms)")
+            self.loop_monitor.record_loop(loop_ms)
 
     # ── message dispatch ───────────────────────────────────────
     def _dispatch_message(self, mtype: str, msg, t_now: float):
@@ -351,14 +342,14 @@ class INSNavigationSystem:
     def _print_stats(self, t: float):
         elapsed = t - self._start_time
         eff_hz  = self._imu_count / max(elapsed, 0.001)
-        avg_loop = np.mean(self._loop_times) if self._loop_times else 0
+        stats   = self.loop_monitor.get_stats()
 
         log.info(
             f"Stats @ {elapsed:.1f}s — "
             f"IMU={self._imu_count} ({eff_hz:.0f} Hz)  "
             f"Baro={self._baro_count}  Mag={self._mag_count}  "
-            f"Loop avg={avg_loop:.1f}ms max={self._max_loop_ms:.1f}ms  "
-            f"Overruns={self._overrun_count}"
+            f"Loop avg={stats['avg']:.1f}ms max={stats['max']:.1f}ms  "
+            f"Overruns={stats['overruns']}"
         )
 
     def _print_final_stats(self):
@@ -369,8 +360,9 @@ class INSNavigationSystem:
         log.info(f"  Baro samples  : {self._baro_count}")
         log.info(f"  Mag samples   : {self._mag_count}")
         log.info(f"  Avg IMU rate  : {self._imu_count/max(elapsed,0.001):.1f} Hz")
-        log.info(f"  Loop overruns : {self._overrun_count}")
-        log.info(f"  Max loop time : {self._max_loop_ms:.1f} ms")
+        stats = self.loop_monitor.get_stats()
+        log.info(f"  Loop overruns : {stats['overruns']}")
+        log.info(f"  Max loop time : {stats['max']:.1f} ms")
 
         pos = self.eskf.state["pos"]
         log.info(f"  Final pos (m) : X={pos[0]:.2f}  Y={pos[1]:.2f}  Z={pos[2]:.2f}")
