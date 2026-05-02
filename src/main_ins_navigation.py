@@ -319,11 +319,16 @@ class INSNavigationSystem:
         att = np.degrees(self.eskf.state["euler"])
         health = self.eskf.health.name
 
+        # NaN guard
+        if np.any(np.isnan(pos)) or np.any(np.isnan(att)):
+            health = "NAN_FAULT"
+
         print(
             f"\r[{elapsed:7.2f}s] "
+            f"Health: {health:9s} | "
             f"Pos X={pos[0]:+6.2f} Y={pos[1]:+6.2f} Z={pos[2]:+6.2f} | "
             f"Att R={att[0]:+5.1f} P={att[1]:+5.1f} Y={att[2]:+5.1f} | "
-            f"{health} | IMU={self._imu_count:6d}",
+            f"IMU={self._imu_count:6d}",
             end="", flush=True,
         )
 
