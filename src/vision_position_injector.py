@@ -20,7 +20,7 @@ import time
 import threading
 import logging
 import numpy as np
-from ekf_core import EKFCore
+from eskf_core import ESKFCore
 
 log = logging.getLogger("vision_injector")
 
@@ -33,7 +33,7 @@ class VisionPositionInjector:
 
     INJECT_HZ = 30    # 30 Hz is sufficient for ArduPilot EKF3
 
-    def __init__(self, bridge, ekf: EKFCore):
+    def __init__(self, bridge, ekf: ESKFCore):
         self.bridge  = bridge
         self.ekf     = ekf
         self._thread = threading.Thread(
