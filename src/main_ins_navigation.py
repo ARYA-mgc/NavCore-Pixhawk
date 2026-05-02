@@ -80,6 +80,7 @@ class INSNavigationSystem:
         self.bridge = MAVLinkBridge(connection_string, baud)
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
+        self.time_sync = TimeSynchronizer(default_dt=self.dt)
 
         # Vision injector (disabled by default, enabled after convergence)
         self._vision_enabled = False
@@ -193,13 +194,8 @@ class INSNavigationSystem:
         if mtype == "RAW_IMU":
             accel, gyro = self.bridge.parse_raw_imu(msg)
 
-            # Compute actual dt from timestamps
-            dt = self.dt
-            if hasattr(msg, 'time_usec') and msg.time_usec > 0:
-                if self._last_imu_t > 0:
-                    dt_actual = t_now - self._last_imu_t
-                    if 0.001 < dt_actual < 0.1:
-                        dt = dt_actual
+            # Use hardware-backed time synchronizer
+            dt = self.time_sync.compute_dt(msg)
             self._last_imu_t = t_now
 
             # Initialization phase: collect samples
@@ -328,6 +324,7 @@ class INSNavigationSystem:
             f"Health: {health:9s} | "
             f"Pos X={pos[0]:+6.2f} Y={pos[1]:+6.2f} Z={pos[2]:+6.2f} | "
             f"Att R={att[0]:+5.1f} P={att[1]:+5.1f} Y={att[2]:+5.1f} | "
+            f"dt: {self.time_sync.latency_s*1000:3.0f}ms lat | "
             f"IMU={self._imu_count:6d}",
             end="", flush=True,
         )
