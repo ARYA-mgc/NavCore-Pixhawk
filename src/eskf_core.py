@@ -391,6 +391,66 @@ class ESKFCore:
         I_KH = np.eye(15) - K @ H_flow
         self.P = I_KH @ self.P @ I_KH.T + K @ R_flow @ K.T
 
+    def update_external(self, z: np.ndarray, z_pred: np.ndarray,
+                        H: np.ndarray, R: np.ndarray,
+                        source: str = "external") -> bool:
+        """
+        Generic external measurement update for VIO, UWB, SLAM, etc.
+
+        Uses Joseph-form covariance update with innovation gating.
+
+        Args:
+            z: (m,) measurement vector.
+            z_pred: (m,) predicted measurement from current state.
+            H: (m, 15) observation matrix for the error state.
+            R: (m, m) measurement noise covariance.
+            source: Label for logging.
+
+        Returns:
+            True if the update was accepted, False if gated out.
+        """
+        if not self._initialized:
+            return False
+
+        m = z.shape[0]
+        y = z - z_pred  # innovation
+
+        # Wrap angles if single-DOF yaw observation
+        if m == 1 and H[0, 8] != 0.0:
+            y[0] = np.arctan2(np.sin(y[0]), np.cos(y[0]))
+
+        # Innovation covariance
+        S = H @ self.P @ H.T + R
+
+        # Innovation gating (chi-squared)
+        try:
+            S_inv = np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            log.warning(f"{source}: singular innovation covariance")
+            return False
+
+        nis = float(y @ S_inv @ y)
+
+        # Chi-squared threshold based on measurement dimension
+        chi2_thresh = {1: 5.991, 2: 9.210, 3: 7.815}.get(m, 3.0 * m)
+
+        if nis > chi2_thresh:
+            log.debug(f"{source} rejected: NIS={nis:.2f} > {chi2_thresh}")
+            return False
+
+        # Kalman gain
+        K = self.P @ H.T @ S_inv
+
+        # Error state injection
+        dx = (K @ y).flatten()
+        self._inject_error(dx)
+
+        # Joseph form covariance update
+        I_KH = np.eye(15) - K @ H
+        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
+
+        return True
+
     # ── Error Injection ────────────────────────────────────────
 
     def _inject_error(self, dx: np.ndarray):

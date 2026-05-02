@@ -373,11 +373,12 @@ This section documents current constraints honestly. These are engineering reali
 | Medium | Loop timing and jitter monitoring | Done (`loop_monitor.py`) |
 | Medium | Fault manager state machine | Done (`fault_manager.py`) |
 | Medium | C++17 + Eigen3 port scaffold | Done (`cpp_port/`) |
-| Future | Visual-Inertial Odometry (VIO) | Stub ready (`vio_pipeline.py`) |
-| Future | ROS2 interface (/odom, /imu topics) | Stub ready (`ros2_interface.py`) |
-| Future | UWB range fusion | Stub ready (`uwb_fusion.py`) |
-| Future | ArduPilot EKF3 blending | Stub ready (`ekf3_blender.py`) |
-| Future | SLAM / visual landmark fusion | Stub ready (`slam_interface.py`) |
+| Medium | Visual-Inertial Odometry (VIO) | Done (`vio_pipeline.py`) |
+| Medium | ROS2 interface (/odom, /imu topics) | Done (`ros2_interface.py`) |
+| Medium | UWB range fusion | Done (`uwb_fusion.py`) |
+| Medium | ArduPilot EKF3 blending (Covariance Intersection) | Done (`ekf3_blender.py`) |
+| Medium | SLAM pose fusion (Umeyama alignment) | Done (`slam_interface.py`) |
+| Medium | Generic external measurement update | Done (`eskf_core.py: update_external`) |
 | Future | Real-flight RTK ground truth validation | Pending hardware test |
 
 ---
