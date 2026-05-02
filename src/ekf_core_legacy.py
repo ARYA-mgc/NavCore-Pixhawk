@@ -1,8 +1,13 @@
 """
-ekf_core.py
-===========
-DEPRECATED: This module uses Euler angles and is kept as a legacy fallback.
-Use eskf_core.py (Error-State EKF with quaternion attitude) for production.
+ekf_core_legacy.py
+==================
+DEPRECATED — DO NOT USE IN NEW CODE.
+
+This module uses Euler angles and suffers from gimbal lock.
+It is retained ONLY for migration verification.
+Will be deleted after Phase 1 migration is complete.
+
+Migration: Use eskf_core.ESKFCore instead.
 
 15-state Extended Kalman Filter for UAV INS.
 Enhanced version with IMU bias estimation.
