@@ -7,8 +7,7 @@
  Hardware : Pixhawk Cube Orange  <->  Raspberry Pi 4 (UART / USB)
 =====================================================================
  Uses Error-State Extended Kalman Filter (ESKF) with quaternion
- attitude representation. Legacy Euler-angle EKF available via
- --legacy flag.
+ attitude representation. Gimbal-lock-free, production-grade.
 =====================================================================
 """
 
@@ -67,13 +66,11 @@ class INSNavigationSystem:
     IMU_WATCHDOG_S   = 0.5           # warn if no IMU for this long
     INIT_SAMPLES     = 50            # samples for sensor init
 
-    def __init__(self, connection_string: str, baud: int, update_hz: int,
-                 use_legacy: bool = False):
+    def __init__(self, connection_string: str, baud: int, update_hz: int):
         self.connection_string = connection_string
         self.baud              = baud
         self.update_hz         = update_hz
         self.dt                = 1.0 / update_hz
-        self.use_legacy        = use_legacy
 
         # sub-systems
         self.noise  = IMUNoiseParams()
@@ -83,13 +80,6 @@ class INSNavigationSystem:
         self.bridge = MAVLinkBridge(connection_string, baud)
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
-
-        # Legacy fallback
-        self._ekf_legacy = None
-        if use_legacy:
-            from ekf_core import EKFCore
-            self._ekf_legacy = EKFCore(self.noise)
-            log.warning("Using LEGACY Euler-angle EKF (not recommended)")
 
         # Vision injector (disabled by default, enabled after convergence)
         self._vision_enabled = False
@@ -197,7 +187,7 @@ class INSNavigationSystem:
 
     # ── message dispatch ───────────────────────────────────────
     def _dispatch_message(self, mtype: str, msg, t_now: float):
-        ekf = self._ekf_legacy if self.use_legacy else self.eskf
+        ekf = self.eskf
 
         # ── IMU → predict ──────────────────────────────────
         if mtype == "RAW_IMU":
@@ -213,7 +203,7 @@ class INSNavigationSystem:
             self._last_imu_t = t_now
 
             # Initialization phase: collect samples
-            if not self.eskf._initialized and not self.use_legacy:
+            if not self.eskf._initialized:
                 self._init_accel_buf.append(accel.copy())
                 if len(self._init_accel_buf) >= self.INIT_SAMPLES:
                     self._try_initialize()
@@ -244,15 +234,12 @@ class INSNavigationSystem:
                     mz = msg.zmag * 1e-3
                     mag_norm = np.sqrt(mx**2 + my**2 + mz**2)
 
-                if self.use_legacy:
-                    ekf.update_mag(yaw_rad)
-                else:
-                    ekf.update_mag(yaw_rad, mag_norm=mag_norm,
-                                   t_now=t_now)
+                ekf.update_mag(yaw_rad, mag_norm=mag_norm,
+                               t_now=t_now)
                 self._mag_count += 1
 
                 # Collect mag for init
-                if not self.eskf._initialized and not self.use_legacy:
+                if not self.eskf._initialized:
                     self._init_mag_buf.append(
                         np.array([msg.xmag, msg.ymag, msg.zmag]) * 1e-3)
 
@@ -263,7 +250,7 @@ class INSNavigationSystem:
             self.bridge.last_gps = msg
 
         elif mtype == "OPTICAL_FLOW_RAD":
-            if not self.use_legacy and self.eskf._initialized:
+            if self.eskf._initialized:
                 if hasattr(msg, 'distance') and msg.distance > 0:
                     flow_vx = (msg.integrated_x - msg.integrated_xgyro)
                     flow_vy = (msg.integrated_y - msg.integrated_ygyro)
@@ -275,15 +262,14 @@ class INSNavigationSystem:
                             vx, vy, msg.distance, msg.quality)
 
         # ── Health-based vision injection control ──────────
-        if not self.use_legacy:
-            health = self.eskf.health
-            if health == EKFHealth.FAULT and self._vision_enabled:
-                self._vision_enabled = False
-                log.error("ESKF FAULT: vision injection DISABLED")
-                self.bridge.send_statustext("INS FAULT: vision disabled", 4)
-            elif health == EKFHealth.HEALTHY and not self._vision_enabled:
-                self._vision_enabled = True
-                log.info("ESKF healthy: vision injection available")
+        health = self.eskf.health
+        if health == EKFHealth.FAULT and self._vision_enabled:
+            self._vision_enabled = False
+            log.error("ESKF FAULT: vision injection DISABLED")
+            self.bridge.send_statustext("INS FAULT: vision disabled", 4)
+        elif health == EKFHealth.HEALTHY and not self._vision_enabled:
+            self._vision_enabled = True
+            log.info("ESKF healthy: vision injection available")
 
     # ── sensor initialization ──────────────────────────────────
     def _try_initialize(self):
@@ -310,10 +296,9 @@ class INSNavigationSystem:
 
     def _log_state(self, t: float):
         elapsed = t - self._start_time
-        ekf = self._ekf_legacy if self.use_legacy else self.eskf
-        pos = ekf.state["pos"]
-        vel = ekf.state["vel"]
-        att = np.degrees(ekf.state["euler"])
+        pos = self.eskf.state["pos"]
+        vel = self.eskf.state["vel"]
+        att = np.degrees(self.eskf.state["euler"])
 
         z_error = 0.0 - pos[2]
         self.adaptive_pid.update(z_error, self.LOG_INTERVAL_S)
@@ -325,15 +310,14 @@ class INSNavigationSystem:
                 f"WARNING: Pi Temp High: {pi_temp:.1f}C", 4)
 
         flow_pos, flow_vel = self.optical_flow.get_state()
-        self.logger.write(elapsed, pos, vel, att, ekf.P,
+        self.logger.write(elapsed, pos, vel, att, self.eskf.P,
                           pi_temp, flow_vel, pid_gains)
 
     def _print_state(self, t: float):
         elapsed = t - self._start_time
-        ekf = self._ekf_legacy if self.use_legacy else self.eskf
-        pos = ekf.state["pos"]
-        att = np.degrees(ekf.state["euler"])
-        health = "LEGACY" if self.use_legacy else self.eskf.health.name
+        pos = self.eskf.state["pos"]
+        att = np.degrees(self.eskf.state["euler"])
+        health = self.eskf.health.name
 
         print(
             f"\r[{elapsed:7.2f}s] "
@@ -367,8 +351,7 @@ class INSNavigationSystem:
         log.info(f"  Loop overruns : {self._overrun_count}")
         log.info(f"  Max loop time : {self._max_loop_ms:.1f} ms")
 
-        ekf = self._ekf_legacy if self.use_legacy else self.eskf
-        pos = ekf.state["pos"]
+        pos = self.eskf.state["pos"]
         log.info(f"  Final pos (m) : X={pos[0]:.2f}  Y={pos[1]:.2f}  Z={pos[2]:.2f}")
 
 
@@ -384,13 +367,10 @@ def parse_args():
     p.add_argument("--baud", "-b",  type=int, default=921600)
     p.add_argument("--hz",         type=int, default=100,
                    help="EKF update rate in Hz (50 or 100)")
-    p.add_argument("--legacy", action="store_true",
-                   help="Use legacy Euler-angle EKF instead of ESKF")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    ins  = INSNavigationSystem(args.connection, args.baud, args.hz,
-                                use_legacy=args.legacy)
+    ins  = INSNavigationSystem(args.connection, args.baud, args.hz)
     ins.run()
