@@ -2,7 +2,7 @@
 """
 benchmark_sitl.py
 =================
-Benchmarks EKF performance against simulated IMU data.
+Benchmarks ESKF performance against simulated IMU data.
 No hardware required — runs standalone.
 Mirrors benchmark_performance.m from the original MATLAB repo.
 
@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import time
 import math
 import numpy as np
-from ekf_core         import EKFCore
+from eskf_core        import ESKFCore
 from dead_reckon      import DeadReckon
 from imu_noise_params import IMUNoiseParams
 
@@ -122,15 +122,19 @@ def simulate_imu(true_pos, true_vel, true_euler, dt, noise: IMUNoiseParams):
 
 def run_benchmark(dt):
     noise = IMUNoiseParams()
-    ekf   = EKFCore(noise)
+    eskf  = ESKFCore(noise)
     dr    = DeadReckon(noise)
+
+    # Initialize ESKF with known attitude (simulation starts level, north)
+    eskf.x[6:10] = eskf._euler_to_quat(0, 0, 0)
+    eskf._initialized = True
 
     t_arr, true_pos, true_vel, true_euler = generate_true_trajectory(dt, DURATION)
     accel_arr, gyro_arr = simulate_imu(true_pos, true_vel, true_euler, dt, noise)
 
     N = len(t_arr)
-    ekf_pos = np.zeros((N, 3))
-    dr_pos  = np.zeros((N, 3))
+    eskf_pos = np.zeros((N, 3))
+    dr_pos   = np.zeros((N, 3))
 
     t_start = time.monotonic()
 
@@ -138,31 +142,31 @@ def run_benchmark(dt):
         accel = accel_arr[i]
         gyro  = gyro_arr[i]
 
-        ekf.predict(accel, gyro, dt)
+        eskf.predict(accel, gyro, dt)
         dr.update(accel, gyro, dt)
 
         # Baro update every 10 steps (~10 Hz)
         if i % max(1, int(0.1/dt)) == 0:
             alt = -true_pos[i, 2] + rng.normal(0, noise.baro_std)
-            ekf.update_baro(alt)
+            eskf.update_baro(alt)
 
         # Mag update every 2 steps (~50 Hz)
         if i % max(1, int(0.02/dt)) == 0:
             yaw = true_euler[i, 2] + rng.normal(0, noise.mag_std)
-            ekf.update_mag(yaw)
+            eskf.update_mag(yaw)
 
-        ekf_pos[i] = ekf.state["pos"]
-        dr_pos[i]  = dr.pos.copy()
+        eskf_pos[i] = eskf.state["pos"]
+        dr_pos[i]   = dr.pos.copy()
 
     elapsed = time.monotonic() - t_start
     eff_hz  = N / elapsed
 
     # ── error analysis ─────────────────────────────────────────
-    ekf_err  = ekf_pos - true_pos
-    dr_err   = dr_pos  - true_pos
-    ekf_rmse = math.sqrt(np.mean(np.sum(ekf_err**2, axis=1)))
-    dr_rmse  = math.sqrt(np.mean(np.sum(dr_err**2,  axis=1)))
-    improve  = (dr_rmse - ekf_rmse) / dr_rmse * 100
+    eskf_err  = eskf_pos - true_pos
+    dr_err    = dr_pos   - true_pos
+    eskf_rmse = math.sqrt(np.mean(np.sum(eskf_err**2, axis=1)))
+    dr_rmse   = math.sqrt(np.mean(np.sum(dr_err**2,  axis=1)))
+    improve   = (dr_rmse - eskf_rmse) / dr_rmse * 100
 
     hz = int(1/dt)
     print(f"\n{'='*50}")
@@ -170,17 +174,17 @@ def run_benchmark(dt):
     print(f"{'='*50}")
     print(f"  Wall time          : {elapsed*1000:.1f} ms")
     print(f"  Effective rate     : {eff_hz:.0f} Hz")
-    print(f"  EKF Pos RMSE       : {ekf_rmse:.3f} m")
-    print(f"  DR  Pos RMSE       : {dr_rmse:.3f} m")
+    print(f"  ESKF Pos RMSE      : {eskf_rmse:.3f} m")
+    print(f"  DR   Pos RMSE      : {dr_rmse:.3f} m")
     print(f"  Drift improvement  : {improve:.1f} %")
-    x_rmse = math.sqrt(np.mean(ekf_err[:,0]**2))
-    y_rmse = math.sqrt(np.mean(ekf_err[:,1]**2))
-    z_rmse = math.sqrt(np.mean(ekf_err[:,2]**2))
+    x_rmse = math.sqrt(np.mean(eskf_err[:,0]**2))
+    y_rmse = math.sqrt(np.mean(eskf_err[:,1]**2))
+    z_rmse = math.sqrt(np.mean(eskf_err[:,2]**2))
     print(f"  Per-axis RMSE  X={x_rmse:.3f}  Y={y_rmse:.3f}  Z={z_rmse:.3f} m")
     print(f"{'='*50}")
 
 
 if __name__ == "__main__":
-    print("\n=== INS Benchmark (Python / RPi4 port) ===")
+    print("\n=== INS Benchmark (ESKF — Quaternion) ===")
     for dt in DT_LIST:
         run_benchmark(dt)
