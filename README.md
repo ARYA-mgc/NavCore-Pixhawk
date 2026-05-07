@@ -182,6 +182,73 @@ Automated Raspberry Pi 4 provisioning script. Installs system packages, creates 
 
 The system follows a three-layer pipeline: sensor acquisition, state estimation, and output distribution.
 
+```mermaid
+graph TD
+    %% Configuration & Time Sync
+    Config["config_loader.py<br>(YAML Schema Validation)"]
+    TimeSync["time_sync.py<br>(Hardware Timestamps)"]
+
+    %% Sensor Layer (Hardware)
+    subgraph "Sensor Acquisition Layer (Hardware: Pixhawk Cube Orange)"
+        PX4["ICM-42688-P IMU<br>MS5611 Barometer<br>RM3100 Magnetometer<br>Optical Flow (Optional)"]
+        MAV["MAVLink 2.0 Interface<br>UART @ 921600 baud"]
+        PX4 -- "RAW_IMU (100Hz)<br>SCALED_PRESSURE (10Hz)<br>SCALED_IMU3 (50Hz)" --> MAV
+    end
+
+    %% State Estimation (Raspberry Pi 4)
+    subgraph "State Estimation Layer (Compute: Raspberry Pi 4)"
+        Bridge["mavlink_bridge.py<br>(Message Parser & Dispatch)"]
+        
+        subgraph "Primary Navigation Core"
+            ESKF["eskf_core.py<br>16-State Error-State Quaternion EKF"]
+            Predict["Predict Step (100Hz)<br>x̄ = f(x, u)<br>P = FPFᵀ + QΔt"]
+            Update["Update Step (10-50Hz)<br>y = z - h(x̄)<br>P = (I - KH)P(I - KH)ᵀ + KRKᵀ"]
+            Harden["Numerical Hardening<br>Eigenvalue Bounds & Symmetry"]
+            
+            ESKF -.-> Predict
+            Predict --> Update
+            Update --> Harden
+        end
+
+        subgraph "Redundancy & Safety Handlers"
+            DR["dead_reckon.py<br>(Strapdown Fallback)"]
+            Flow["optical_flow_ins.py<br>(Velocity Cross-check)"]
+            Fault["fault_manager.py<br>(Sensor Dropout & Escalation)"]
+            Safety["safety_monitor.py<br>(Velocity/Tilt Limits)"]
+        end
+        
+        Config -. "Noise Params" .-> ESKF
+        TimeSync -. "Sync" .-> Bridge
+        MAV -- "Binary Stream" --> Bridge
+        
+        Bridge -- "Accel/Gyro/Baro/Mag" --> ESKF
+        Bridge -- "Raw IMU" --> DR
+        Bridge -- "Flow/Gyro" --> Flow
+        
+        Harden -- "State: [p, v, q, b_a, b_g]" --> Safety
+        Flow -. "Flow Vel" .-> Fault
+        DR -. "DR Pose" .-> Fault
+        Harden -. "Innovations / Covariance" .-> Fault
+        
+        Fault -- "Trigger Mode Switch" --> Safety
+    end
+
+    %% Output Distribution
+    subgraph "Output & Control Layer"
+        Log["ins_logger.py / structured_logger.py<br>CSV (50Hz) + JSONL"]
+        Vis["vision_position_injector.py<br>VISION_POSITION_ESTIMATE (30Hz)"]
+        Ctrl["adaptive_pid.py<br>Gain-Scheduled Control"]
+        ArduPilot["ArduPilot EKF3<br>(Flight Controller)"]
+        
+        Safety -- "Validated State" --> Log
+        Safety -- "Validated State" --> Vis
+        Safety -- "Validated State" --> Ctrl
+        
+        Vis -- "Fused Global Pose" --> ArduPilot
+        Ctrl -- "Thrust/Attitude Commands" --> ArduPilot
+    end
+```
+
 **Sensor Layer** -- The Pixhawk Cube Orange streams raw IMU data at 100 Hz, barometric pressure at 10 Hz, and magnetometer readings at 50 Hz over a MAVLink 2.0 UART link at 921600 baud.
 
 **Estimation Layer** -- `mavlink_bridge.py` on the Raspberry Pi 4 receives and parses `RAW_IMU`, `SCALED_PRESSURE`, and `SCALED_IMU3` messages. The parsed sensor data is passed to `eskf_core.py`, which implements a 16-state Error-State Quaternion EKF:
@@ -379,7 +446,7 @@ This section documents current constraints honestly. These are engineering reali
 | Medium | ArduPilot EKF3 blending (Covariance Intersection) | Done (`ekf3_blender.py`) |
 | Medium | SLAM pose fusion (Umeyama alignment) | Done (`slam_interface.py`) |
 | Medium | Generic external measurement update | Done (`eskf_core.py: update_external`) |
-
+| Future | Real-flight RTK ground truth validation | Pending hardware test |
 
 ---
 
