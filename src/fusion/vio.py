@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""
-vio_pipeline.py
-===============
-Visual Inertial Odometry (VIO) integration for the ESKF.
-
-Accepts 6-DOF pose updates from an external VIO system
-(e.g., T265 RealSense, ORB-SLAM3, VINS-Mono) and injects
-them into the ESKF as position + yaw corrections.
-
-Frame handling:
-    VIO systems typically output in a camera or local-gravity frame.
-    This module applies a rigid-body transform (T_vio_to_ned) to
-    convert poses into the ESKF's NED frame before fusion.
-
-Gating:
-    - Confidence threshold (reject low-quality tracking)
-    - Innovation gating (Mahalanobis distance)
-    - Rate limiting (discard if too close to previous update)
-    - Outlier buffering (median filter on position jumps)
-"""
+# Camera plus math equals position. Don't cover the lens.
 
 import logging
 import math

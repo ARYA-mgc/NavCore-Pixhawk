@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-dead_reckon.py
-==============
-Fallback dead-reckoning (no Kalman filter).
-Used for comparison and as a fallback if EKF diverges.
-Port of dead_reckon.m
-"""
+# When the sensors die, we just guess where we are based on where we were. It works... for a few seconds.
 
 import math
 import numpy as np

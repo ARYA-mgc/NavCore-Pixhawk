@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-optical_flow_ins.py
-===================
-Fallback INS using Optical Flow (OPTICAL_FLOW_RAD).
-Provides secondary velocity and position estimates when GPS is denied.
-"""
+# Looking at the ground to figure out how fast we're moving. Literally just staring at dirt.
 
 import math
 import numpy as np

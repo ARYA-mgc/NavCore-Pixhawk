@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""
-test_failure_scenarios.py
-=========================
-Tests ESKF robustness under failure conditions:
-  - Sensor dropout (baro, mag)
-  - Noise spikes (10x burst)
-  - Wrong calibration (5x bias)
-  - Magnetometer disturbance (field doubles)
+# This is where we torture the ESKF math wizard.
+# We cut its sensors, scream at it with noise, and basically ruin its day.
+# If it survives, it's ready for flight.
 
-Run: pytest tests/test_failure_scenarios.py -v
-"""
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -17,8 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import math
 import numpy as np
 import pytest
-from eskf_core import ESKFCore, EKFHealth
-from imu_noise_params import IMUNoiseParams
+from core.eskf import ESKF, EKFHealth
+from utils.noise import IMUNoiseParams
 
 rng = np.random.default_rng(99)
 
@@ -26,7 +19,7 @@ rng = np.random.default_rng(99)
 @pytest.fixture
 def eskf():
     noise = IMUNoiseParams()
-    e = ESKFCore(noise)
+    e = ESKF(noise)
     e.x[6:10] = e._euler_to_quat(0, 0, 0)
     e._initialized = True
     return e

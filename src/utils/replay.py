@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""
-log_replay.py
-=============
-Offline replay of MAVLink or JSONL logs through the ESKFCore.
-
-Usage:
-    python log_replay.py logs/ins_structured_20260502.jsonl
-    python log_replay.py flight_log.tlog --format mavlink
-
-Modes:
-    JSONL: Replays structured_logger.py output through the ESKF
-           deterministically. Ideal for tuning / debugging.
-    MAVLink: Parses .tlog / .bin MAVLink logs and replays IMU,
-             baro, and mag messages.
-
-Output:
-    Writes a new JSONL replay log with recomputed states for
-    side-by-side comparison with the original.
-"""
+# Time travel. Replaying old flights to see why we crashed.
 
 import json
 import sys
@@ -30,16 +12,16 @@ log = logging.getLogger("log_replay")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from eskf_core import ESKFCore, EKFHealth
+from eskf_core import ESKF, EKFHealth
 from imu_noise_params import IMUNoiseParams
-from structured_logger import StructuredLogger
+from logger.struct_log import StructuredLogger
 
 
 class LogReplay:
     """
     Deterministic offline replay engine.
 
-    Feeds stored sensor data through a fresh ESKFCore instance
+    Feeds stored sensor data through a fresh ESKF instance
     and records full state output for comparison.
     """
 
@@ -49,7 +31,7 @@ class LogReplay:
         else:
             self.noise = IMUNoiseParams()
 
-        self.eskf = ESKFCore(self.noise)
+        self.eskf = ESKF(self.noise)
         self._record_count = 0
 
     def replay_jsonl(self, input_path: str, output_dir: str = "logs"):

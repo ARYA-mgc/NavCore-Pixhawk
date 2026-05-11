@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""
-fault_manager.py
-================
-High-level fault supervisor for the INS navigation system.
-
-Sits above SafetyMonitor and manages:
-  - Sensor dropout detection and tracking
-  - EKF reset decisions
-  - Fallback mode escalation (full ESKF → dead-reckoning → hold)
-  - Recovery sequencing after faults clear
-
-State machine:
-    NOMINAL → DEGRADED → FAILSAFE → EMERGENCY
-    Each transition has hysteresis to prevent oscillation.
-"""
+# The panic button coordinator.
 
 import time
 import logging

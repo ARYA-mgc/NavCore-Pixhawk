@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
-"""
-monte_carlo_sim.py
-==================
-Run 100+ Monte Carlo simulations to validate ESKF drift statistics.
-No hardware required.
-
-Usage: python tests/monte_carlo_sim.py [--runs 100]
-"""
+# We simulate the drone flying 100 times because we don't want to crash 100 real drones.
+# Spoiler: The math wizard usually wins.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -15,9 +9,9 @@ import time
 import math
 import argparse
 import numpy as np
-from eskf_core import ESKFCore
-from dead_reckon import DeadReckon
-from imu_noise_params import IMUNoiseParams
+from core.eskf import ESKF
+from core.dr import DeadReckon
+from utils.noise import IMUNoiseParams
 
 DURATION = 30.0
 GRAVITY = 9.80665
@@ -87,7 +81,7 @@ def simulate_imu(true_pos, true_vel, true_euler, dt, noise, rng):
 def run_single(dt, seed):
     rng = np.random.default_rng(seed)
     noise = IMUNoiseParams()
-    eskf = ESKFCore(noise)
+    eskf = ESKF(noise)
     dr = DeadReckon(noise)
 
     # Initialize ESKF with known attitude

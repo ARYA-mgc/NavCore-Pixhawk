@@ -1,15 +1,8 @@
 #!/bin/bash
 # scripts/setup_rpi4.sh
-# ─────────────────────────────────────────────────────────────────
-# One-shot setup script for Raspberry Pi 4 running Raspberry Pi OS
-# (Bookworm / Bullseye 64-bit).
-#
-# Sets up:
-#   1. Python 3 virtual environment
-#   2. pymavlink + dependencies
-#   3. UART (/dev/ttyAMA0) for Pixhawk Cube Orange
-#   4. Systemd service for auto-start on boot
-# ─────────────────────────────────────────────────────────────────
+# The big red button script to get the Pi ready.
+# Sets up the virtual env, forces the UART open, and creates a background service.
+# Just run this and go get a coffee.
 set -e
 
 echo "============================================="
@@ -73,7 +66,7 @@ Wants=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$REPO_DIR/src
-ExecStart=$VENV_DIR/bin/python main_ins_navigation.py \\
+ExecStart=$VENV_DIR/bin/python core/main.py \\
     --connection /dev/ttyAMA0 \\
     --baud 921600 \\
     --hz 100
@@ -96,9 +89,9 @@ echo "  Logs  : journalctl -u ins-drone -f"
 
 # ── 6. Run benchmark (no hardware) ───────────────────────────
 echo ""
-echo "Running software benchmark (no hardware needed)..."
+echo "Running the drag race bench to see if it works..."
 cd "$REPO_DIR/src"
-PYTHONPATH="$REPO_DIR/src" python "$REPO_DIR/tests/benchmark_sitl.py"
+PYTHONPATH="$REPO_DIR/src" python "$REPO_DIR/tests/bench.py"
 
 echo ""
 echo "============================================="
@@ -118,5 +111,5 @@ echo ""
 echo " Run manually:"
 echo "   source $VENV_DIR/bin/activate"
 echo "   cd $REPO_DIR/src"
-echo "   python main_ins_navigation.py"
+echo "   python core/main.py"
 echo "============================================="

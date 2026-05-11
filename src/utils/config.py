@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""
-config_loader.py
-================
-Strict YAML configuration loader with schema validation, range
-checking, and fail-fast on any anomaly.
-
-Usage:
-    from config_loader import load_config
-
-    cfg = load_config("config/noise_params.yaml")
-    # Raises ConfigError on any schema/range violation.
-
-Design:
-    - No silent defaults. If a required field is missing, we fail.
-    - Every numeric parameter is bounds-checked against physical limits.
-    - Unknown keys are rejected (prevents typo-silencing).
-    - Produces a frozen, validated dict — not a mutable object.
-"""
+# Reading the JSON files so we don't hardcode everything (even though we want to).
 
 import os
 import yaml

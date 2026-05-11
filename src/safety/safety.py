@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""
-safety_monitor.py
-=================
-Hard safety enforcement layer for INS navigation.
-
-Sits between estimator output and injection to ArduPilot.
-Checks velocity limits, tilt limits, position jumps, and
-auto-disables injection on any violation.
-
-Architecture:
-  [ ESKF ] → [ SafetyMonitor ] → [ VisionInjector / Output ]
-"""
+# If things get too crazy, we trigger RTL (Return To Land). Please don't hit a tree on the way back.
 
 import math
 import logging

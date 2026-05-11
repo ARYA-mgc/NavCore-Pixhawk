@@ -1,10 +1,4 @@
-"""
-structured_logger.py
-====================
-Provides rich, structured JSON Lines (JSONL) logging for the INS.
-Captures full estimator state, covariance, innovations, and health
-metrics for offline replay and tuning (Phase 3).
-"""
+# Writing JSON logs for the fancy dashboards.
 
 import os
 import json

@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""
-ekf3_blender.py
-===============
-Weighted blending and cross-checking between NavCore ESKF and
-ArduPilot EKF3 outputs.
-
-Blending modes:
-    ESKF_ONLY:  Use NavCore ESKF exclusively (default, safest).
-    EKF3_ONLY:  Use ArduPilot EKF3 exclusively.
-    WEIGHTED:   Covariance-Intersection (CI) blend of both.
-    CROSSCHECK: Use ESKF but alarm if EKF3 diverges too far.
-
-The WEIGHTED mode uses proper Covariance Intersection rather
-than a naive average, ensuring the fused covariance is consistent
-even when the two estimators share correlated information.
-
-Covariance Intersection:
-    P_fused^-1 = alpha * P_eskf^-1 + (1-alpha) * P_ekf3^-1
-    x_fused = P_fused * (alpha * P_eskf^-1 * x_eskf + (1-alpha) * P_ekf3^-1 * x_ekf3)
-    alpha is chosen to minimise trace(P_fused).
-"""
+# Taking our math guesses and ArduPilot's guesses and tossing them in a blender.
 
 import logging
 import math

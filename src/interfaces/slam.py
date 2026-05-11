@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""
-slam_interface.py
-=================
-Generic SLAM pose injection for the ESKF.
-
-Accepts 6-DOF pose updates from any SLAM backend (ORB-SLAM3,
-LIO-SAM, LOAM, RTAB-Map, etc.) and injects them into the ESKF
-as position + orientation corrections.
-
-Frame handling:
-    SLAM systems output in their own world frame. This module
-    maintains a rigid-body transform T_slam_to_ned computed via
-    Umeyama alignment or a single matched pose pair.
-
-Features:
-    - Automatic and manual frame alignment
-    - Innovation gating (Mahalanobis distance)
-    - Loop closure detection with covariance reset
-    - Pose rate limiting and outlier rejection
-    - Configurable covariance scaling per SLAM confidence
-"""
+# Simultaneous Localization and... yeah you know what it means.
 
 import logging
 import math

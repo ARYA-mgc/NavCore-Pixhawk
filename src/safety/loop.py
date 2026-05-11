@@ -1,9 +1,4 @@
-"""
-loop_monitor.py
-===============
-Monitors real-time loop execution, tracks jitter and latency histograms,
-and provides OS scheduling hints to prioritize the INS process.
-"""
+# Making sure the while loop doesn't take a nap.
 
 import time
 import logging

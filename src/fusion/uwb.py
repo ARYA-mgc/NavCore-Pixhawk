@@ -1,23 +1,5 @@
 #!/usr/bin/env python3
-"""
-uwb_fusion.py
-=============
-Ultra-Wideband (UWB) range fusion for the ESKF.
-
-Fuses range measurements from known UWB anchor positions using:
-  - Range-only measurement update (single anchor, nonlinear H)
-  - Least-squares trilateration (3+ anchors)
-  - Innovation gating (chi-squared on range residual)
-  - NLOS detection (range residual exceeding threshold)
-  - Anchor staleness tracking
-
-The range measurement model is:
-    z = ||p_anchor - p_drone|| + noise
-
-This is nonlinear, so we linearise around the current position estimate:
-    H = -(p_anchor - p_hat)^T / ||p_anchor - p_hat||
-    mapped to the position states [0:3] of the 15-dim error state.
-"""
+# Radio beacons beep-booping to give us position. Kinda like GPS but indoors and way more annoying to set up.
 
 import logging
 import math

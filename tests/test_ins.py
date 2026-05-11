@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""
-test_ins.py
-===========
-Unit tests for ESKF, dead-reckoning, and noise params.
-Run: pytest tests/test_ins.py -v
-"""
+# This is where we poke the math wizard with a stick to see if it breaks.
+# Also testing if the dead reckoning actually reckons anything.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -12,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import math
 import numpy as np
 import pytest
-from eskf_core        import ESKFCore, EKFHealth
-from imu_noise_params import IMUNoiseParams
-from dead_reckon      import DeadReckon
+from core.eskf        import ESKF, EKFHealth
+from utils.noise      import IMUNoiseParams
+from core.dr import DeadReckon
 
 
 # ── fixtures ────────────────────────────────────────────────────
@@ -24,7 +20,7 @@ def noise():
 
 @pytest.fixture
 def eskf(noise):
-    e = ESKFCore(noise)
+    e = ESKF(noise)
     # Initialize with identity quaternion (level, north-facing)
     e.x[6:10] = e._euler_to_quat(0, 0, 0)
     e._initialized = True
@@ -107,7 +103,7 @@ class TestESKFCore:
         assert eskf.x[6] == 1.0  # identity quaternion restored
 
     def test_health_starts_converging(self, noise):
-        e = ESKFCore(noise)
+        e = ESKF(noise)
         assert e.health == EKFHealth.CONVERGING
 
     def test_health_becomes_healthy(self, eskf):

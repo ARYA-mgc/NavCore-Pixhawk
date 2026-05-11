@@ -1,18 +1,20 @@
-# NavCore-Pixhawk -- GPS-Denied INS Navigation System
+# NavCore-Pixhawk -- The "We Don't Need No Stinkin' GPS" Navigation System
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
 [![MAVLink](https://img.shields.io/badge/Protocol-MAVLink%202.0-green)](https://mavlink.io)
 [![Hardware](https://img.shields.io/badge/FC-Pixhawk%20Cube%20Orange-orange)](https://cubepilot.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> Real-time GPS-denied INS for UAVs using a **Pixhawk Cube Orange** flight controller and **Raspberry Pi 4** companion computer.  
-> Python port + hardware extension of [ins-system-for-drone (MATLAB)](https://github.com/ARYA-mgc/ins-system-for-drone).
+> Real-time GPS-denied INS for UAVs using a **Pixhawk Cube Orange** and a **Raspberry Pi 4**.  
+> We basically ported a giant MATLAB headache into Python, slapped it on a drone, and it actually flies.
 
 ---
 
-## Overview
+## What is this? (Overview)
 
-NavCore-Pixhawk implements a tightly-coupled Inertial Navigation System for hexacopter UAVs operating without GPS dependency. The system fuses onboard IMU, barometer, and magnetometer data through a **16-state Error-State Quaternion EKF (ESKF)**, providing continuous position, velocity, attitude, and bias estimates. Filtered navigation states are injected back into ArduPilot's EKF3 as an external navigation source via `VISION_POSITION_ESTIMATE`, enabling autonomous flight in GPS-denied environments.
+NavCore-Pixhawk is the result of asking, "What if the GPS dies and the drone panics?" It implements a tightly-coupled Inertial Navigation System (INS) that fuses IMU, barometer, and magnetometer data. It uses a **16-state Error-State Quaternion EKF (ESKF)**, which is just a fancy way of saying "a math wizard that guesses where the drone is so it doesn't crash."
+
+We take these guesses and feed them back into ArduPilot's EKF3 as a fake GPS signal via `VISION_POSITION_ESTIMATE`. ArduPilot is happy, the drone flies, and we get to look like geniuses.
 
 ---
 
@@ -36,9 +38,9 @@ NavCore-Pixhawk implements a tightly-coupled Inertial Navigation System for hexa
 
 Live flight test of the hexacopter with NavCore-Pixhawk INS active, validating real-time state estimation performance under actual flight conditions. GPS was enabled during this test solely as a safety fallback and was not used as a navigation input to the INS pipeline.
 
-https://github.com/ARYA-mgc/NavCore-Pixhawk/raw/main/fly%20video%20.mp4
+https://github.com/ARYA-mgc/NavCore-Pixhawk/raw/main/doc/flight.mp4
 
-> If the video does not render inline, download [`fly video .mp4`](fly%20video%20.mp4) directly from the repository.
+> If the video does not render inline, download [`flight.mp4`](doc/flight.mp4) directly from the repository.
 
 ---
 
@@ -48,25 +50,25 @@ https://github.com/ARYA-mgc/NavCore-Pixhawk/raw/main/fly%20video%20.mp4
 
 Five-waypoint autonomous mission configured in Mission Planner GCS over satellite imagery. Waypoints are set at 100 m AGL with computed distances and azimuth bearings between each point. The total mission covers approximately 0.8 km with loiter radius and altitude verification enabled. Connected via COM3 at 115200 baud.
 
-![Mission Planner - Flight Plan Configuration](mission_planner_screen_flight_plan.jpg)
+![Mission Planner - Flight Plan Configuration](doc/mission.jpg)
 
 ### Compass Calibration -- Onboard Magnetometer Setup
 
 Mission Planner compass priority and onboard magnetometer calibration interface. Six compass sensors detected: primary UAVCAN compass (DevID 97539), SPI-based LSM303D and AK8963, and three additional UAVCAN sensors. The onboard MagCal panel provides per-magnetometer calibration progress bars (Mag 1/2/3) with fitness validation. Proper compass calibration is critical for accurate heading estimation in GPS-denied navigation.
 
-![Compass Calibration - Onboard Magnetometer Setup](CompassCalibration_Onboard.png)
+![Compass Calibration - Onboard Magnetometer Setup](doc/compass_calib.png)
 
 ### Hexacopter Hardware Assembly
 
 Carbon-fibre hexacopter frame with Pixhawk Cube Orange flight controller (orange housing, centre-mounted), external GPS/compass module on mast, ESCs with XT60 connectors, and telemetry radio. The companion computer (Raspberry Pi 4) connects via TELEM2 UART for real-time INS data streaming.
 
-![Hexacopter Hardware Assembly](hardware_assembly.jpeg)
+![Hexacopter Hardware Assembly](doc/hardware.jpeg)
 
 ### 3D Flight Path Visualization
 
 Post-flight 3D trajectory reconstruction rendered in a satellite-overlay viewer. The colour gradient (green to orange to red) encodes distance from home position. The flight path shows multiple waypoint traversals, loiter patterns, and return-to-launch segments. The END marker indicates the final landing position.
 
-![3D Flight Path Visualization](flight_test.jpg)
+![3D Flight Path Visualization](doc/flight3d.jpg)
 
 ---
 
@@ -389,13 +391,13 @@ For full simulation documentation, results, and visual analysis, see the [MATLAB
 
 ---
 
-## Known Limitations
+## Known Limitations (aka "It's a feature, not a bug")
 
-This section documents current constraints honestly. These are engineering realities, not deficiencies.
+This section documents current constraints honestly. Yes, we know about them. No, we aren't fixing them today.
 
-**Accuracy Validation**: The 0.4-0.8 m RMSE figure is validated **in simulation only**. Real-flight accuracy requires RTK GPS or motion capture ground truth. The `ground_truth_eval.py` tool is available for APE/RPE computation against standardised CSV ground-truth data, but has not yet been validated against real hardware ground truth.
+**Accuracy Validation**: The 0.4-0.8 m RMSE figure is validated **in simulation only**. In real life? Well, it hasn't hit a tree yet, but real-flight accuracy still needs RTK GPS ground truth to be mathematically proven.
 
-**State Representation**: The system uses exclusively a 16-state Error-State Quaternion EKF (`eskf_core.py`). The legacy Euler-angle EKF has been **permanently deleted**. There is no fallback to Euler angles.
+**State Representation**: We use a 16-state Error-State Quaternion EKF. The legacy Euler-angle EKF was permanently deleted because gimbal lock is for losers. There is no fallback.
 
 **Sensor Limitations**: Pure IMU + barometer + magnetometer fusion will drift over time without external correction. The magnetometer is treated as unreliable by default — 3-tier rejection (norm check, EMI cooldown, multi-sample re-enable) mitigates interference but cannot eliminate it. Long-duration GPS-denied flights require visual-inertial correction.
 

@@ -1,10 +1,4 @@
-"""
-time_sync.py
-============
-Handles rigorous timestamping and latency compensation for the INS.
-Essential for EKF numerical stability. Avoids relying on OS thread
-scheduling for `dt` calculations.
-"""
+# Clocks drifting? Not on my watch.
 
 import time
 import logging

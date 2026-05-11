@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
-"""
-benchmark_sitl.py
-=================
-Benchmarks ESKF performance against simulated IMU data.
-No hardware required — runs standalone.
-Mirrors benchmark_performance.m from the original MATLAB repo.
-
-Usage:  python tests/benchmark_sitl.py
-"""
+# Let's see how fast this baby can run on a potato.
+# Basically a drag race for the ESKF code.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -15,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import time
 import math
 import numpy as np
-from eskf_core        import ESKFCore
-from dead_reckon      import DeadReckon
-from imu_noise_params import IMUNoiseParams
+from core.eskf        import ESKF
+from core.dr import DeadReckon
+from utils.noise      import IMUNoiseParams
 
 # ── simulation parameters ────────────────────────────────────────
 DT_LIST   = [0.02, 0.01]   # 50 Hz and 100 Hz
@@ -122,7 +115,7 @@ def simulate_imu(true_pos, true_vel, true_euler, dt, noise: IMUNoiseParams):
 
 def run_benchmark(dt):
     noise = IMUNoiseParams()
-    eskf  = ESKFCore(noise)
+    eskf  = ESKF(noise)
     dr    = DeadReckon(noise)
 
     # Initialize ESKF with known attitude (simulation starts level, north)

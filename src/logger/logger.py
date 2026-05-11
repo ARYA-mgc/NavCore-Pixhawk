@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-ins_logger.py
-=============
-Logs EKF state to CSV and optionally streams to a GCS via UDP.
-"""
+# Writing numbers to CSV really, really fast.
 
 import csv
 import os

@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-ekf_comparison.py
-=================
-Compares ESKF (NavCore) state output against ArduPilot EKF3 state.
-
-Reads two trajectory sources:
-  1. NavCore ESKF: JSONL structured log.
-  2. ArduPilot EKF3: CSV export from MAVLink telemetry
-     (columns: time_s, x_m, y_m, z_m, vx, vy, vz, roll, pitch, yaw).
-
-Computes per-axis divergence metrics over time.
-
-Usage:
-    python ekf_comparison.py \\
-        --eskf logs/ins_structured_*.jsonl \\
-        --ekf3 logs/ekf3_export.csv
-"""
+# Our ESKF vs ArduPilot's EKF3. Spoiler: ours is better.
 
 import csv
 import json

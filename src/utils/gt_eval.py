@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""
-ground_truth_eval.py
-====================
-Computes Absolute Pose Error (APE) and Relative Pose Error (RPE)
-between the ESKF estimate and ground-truth reference trajectory.
-
-Ground-truth CSV format (NED frame):
-    time_s, x_m, y_m, z_m, qw, qx, qy, qz, vx_mps, vy_mps, vz_mps
-
-Usage:
-    python ground_truth_eval.py \\
-        --est logs/ins_structured_*.jsonl \\
-        --gt  ground_truth.csv
-
-Output:
-    APE and RPE statistics (RMSE, mean, median, max).
-"""
+# Did we actually fly where we thought we did? Let's check.
 
 import csv
 import json

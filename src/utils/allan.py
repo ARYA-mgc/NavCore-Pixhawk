@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""
-allan_variance.py
-=================
-Computes Allan Variance from stationary IMU logs and outputs
-optimal noise parameters for the ESKF.
-
-Usage:
-    python allan_variance.py logs/ins_structured_20260502.jsonl
-
-Input:
-    JSONL file from structured_logger.py (stationary vehicle).
-    Each record must contain accel/gyro raw data at known dt.
-
-Output:
-    Prints fitted noise parameters and writes a tuned YAML config.
-
-Theory:
-    Allan Variance decomposes sensor noise into:
-      - White noise (angle/velocity random walk)  → slope = -1/2
-      - Bias instability                          → slope = 0
-      - Rate random walk                          → slope = +1/2
-
-    We fit these regions on a log-log Allan Deviation plot.
-"""
+# Staring at sensor noise for 5 hours to draw a pretty graph.
 
 import json
 import sys

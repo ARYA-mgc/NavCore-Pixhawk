@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
-"""
-ros2_interface.py
-=================
-Optional ROS2 publisher node for the INS navigation system.
-
-Publishes:
-    /ins/odom       (nav_msgs/Odometry)      — full pose + velocity
-    /ins/imu        (sensor_msgs/Imu)         — raw IMU data
-    /ins/health     (std_msgs/String)          — health status JSON
-
-This is a WRAPPER ONLY. The core ESKF runs independently.
-ROS2 is an optional telemetry layer, not a dependency.
-
-Usage:
-    # Only import if ROS2 is available
-    from ros2_interface import INSRos2Publisher
-    publisher = INSRos2Publisher()
-    publisher.publish_odom(state, covariance)
-
-Requirements:
-    pip install rclpy  (or ROS2 workspace with sourced setup.bash)
-"""
+# Talking to ROS2 because someone decided we need more middleware.
 
 import logging
 import numpy as np
