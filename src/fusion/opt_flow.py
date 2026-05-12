@@ -12,11 +12,7 @@ class OpticalFlowINS:
         self.quality_threshold = 10  # Minimum quality to trust flow
 
     def update(self, flow_msg, current_yaw_rad: float):
-        """
-        Updates velocity and position from OPTICAL_FLOW_RAD message.
-        flow_msg should have: integration_time_us, integrated_x, integrated_y,
-                              integrated_xgyro, integrated_ygyro, distance, quality
-        """
+        # Updates velocity and position from OPTICAL_FLOW_RAD message.
         if flow_msg.quality < self.quality_threshold or flow_msg.distance <= 0:
             return  # Cannot use this reading
             
@@ -58,5 +54,5 @@ class OpticalFlowINS:
         self.pos[1] += v_ned_y * dt_s
 
     def get_state(self):
-        """Returns position and velocity estimates"""
+        # Returns position and velocity estimates
         return self.pos.copy(), self.vel.copy()

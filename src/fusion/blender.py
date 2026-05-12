@@ -18,10 +18,7 @@ class BlendMode(Enum):
 
 
 class EKF3Blender:
-    """
-    Cross-checking and covariance-intersection blending between
-    the ESKF and ArduPilot's EKF3.
-    """
+    # Cross-checking and covariance-intersection blending between
 
     # Divergence thresholds
     POS_DIVERGE_WARN = 2.0     # meters
@@ -66,7 +63,7 @@ class EKF3Blender:
 
     def update_eskf(self, pos: np.ndarray, vel: np.ndarray,
                     euler: np.ndarray, P: np.ndarray):
-        """Update with latest ESKF state and covariance."""
+        # Update with latest ESKF state and covariance.
         self._last_eskf_state = {
             "pos": np.asarray(pos, dtype=float).copy(),
             "vel": np.asarray(vel, dtype=float).copy(),
@@ -79,12 +76,7 @@ class EKF3Blender:
                     pos_variance: float = 1.0,
                     vel_variance: float = 0.5,
                     att_variance: float = 0.01):
-        """
-        Update with latest ArduPilot EKF3 state.
-
-        EKF3 doesn't expose its full covariance — approximate
-        with scalar variances extracted from EKF_STATUS_REPORT.
-        """
+        # Update with latest ArduPilot EKF3 state.
         self._last_ekf3_state = {
             "pos": np.asarray(pos, dtype=float).copy(),
             "vel": np.asarray(vel, dtype=float).copy(),
@@ -97,12 +89,7 @@ class EKF3Blender:
         }
 
     def get_blended_output(self) -> Optional[dict]:
-        """
-        Compute the blended output based on current mode.
-
-        Returns:
-            Dict with 'pos', 'vel', 'euler', or None.
-        """
+        # Compute the blended output based on current mode.
         eskf = self._last_eskf_state
         ekf3 = self._last_ekf3_state
 
@@ -124,7 +111,7 @@ class EKF3Blender:
         return eskf
 
     def _crosscheck(self, eskf: dict, ekf3: dict) -> dict:
-        """Use ESKF but track divergence with hysteresis."""
+        # Use ESKF but track divergence with hysteresis.
         pos_diff = np.linalg.norm(eskf["pos"] - ekf3["pos"])
         vel_diff = np.linalg.norm(eskf["vel"] - ekf3["vel"])
 
@@ -168,12 +155,7 @@ class EKF3Blender:
         return result
 
     def _covariance_intersection(self, eskf: dict, ekf3: dict) -> dict:
-        """
-        Covariance Intersection (CI) blend.
-
-        Fuses two estimates with unknown correlation by finding
-        the alpha that minimises trace(P_fused) for each 3-DOF block.
-        """
+        # Covariance Intersection (CI) blend.
         self._blend_count += 1
 
         pos_fused, P_pos = self._ci_blend_3dof(
@@ -201,11 +183,7 @@ class EKF3Blender:
     def _ci_blend_3dof(x1: np.ndarray, p1_diag: np.ndarray,
                        x2: np.ndarray, p2_diag: np.ndarray,
                        alpha_steps: int = 11):
-        """
-        1D Covariance Intersection per axis, optimal alpha search.
-
-        For diagonal covariance, CI reduces to per-axis scalar fusion.
-        """
+        # 1D Covariance Intersection per axis, optimal alpha search.
         fused_x = np.zeros(3)
         fused_p = np.zeros(3)
 
@@ -236,9 +214,7 @@ class EKF3Blender:
     @staticmethod
     def _blend_euler(e1: np.ndarray, p1_diag: np.ndarray,
                      e2: np.ndarray, p2_diag: np.ndarray) -> np.ndarray:
-        """
-        Blend Euler angles with yaw wrapping.
-        """
+        # Blend Euler angles with yaw wrapping.
         fused = np.zeros(3)
         for i in range(3):
             v1 = max(p1_diag[i], 1e-10)

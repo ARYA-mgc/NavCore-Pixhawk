@@ -35,13 +35,13 @@ def run_predict_steps(eskf, n=100, dt=0.01):
 class TestSensorDropout:
 
     def test_baro_dropout_10s(self, eskf):
-        """EKF should survive 10s without baro updates."""
+        # can it fly blind for 10 seconds without baro? let's see
         run_predict_steps(eskf, 1000, 0.01)  # 10s of IMU only
         assert eskf.health != EKFHealth.FAULT
         assert not np.any(np.isnan(eskf.x))
 
     def test_mag_dropout_30s(self, eskf):
-        """EKF covariance grows without mag -- detects correctly."""
+        # no compass = growing uncertainty, filter should know
         run_predict_steps(eskf, 3000, 0.01)
         # Without any corrections, P trace WILL exceed limit.
         # This is correct physical behavior. The EKF correctly
@@ -50,7 +50,7 @@ class TestSensorDropout:
         assert not np.any(np.isnan(eskf.x))
 
     def test_all_sensors_present(self, eskf):
-        """Normal operation with all sensors should be HEALTHY."""
+        # everything connected = should report healthy
         accel = np.array([0.0, 0.0, -9.80665])
         gyro = np.zeros(3)
         for i in range(500):
@@ -65,7 +65,7 @@ class TestSensorDropout:
 class TestNoiseSikes:
 
     def test_accel_noise_spike(self, eskf):
-        """10x accel noise burst for 1s should not crash."""
+        # blast it with noise, it should tank it
         accel_normal = np.array([0.0, 0.0, -9.80665])
         gyro = np.zeros(3)
 
@@ -82,7 +82,7 @@ class TestNoiseSikes:
         assert not np.any(np.isnan(eskf.x))
 
     def test_baro_spike_rejected(self, eskf):
-        """Large baro spike should be rejected by innovation gating."""
+        # baro goes crazy? filter should ignore it
         run_predict_steps(eskf, 100)
         eskf.update_baro(0.0)  # normal
         eskf.update_baro(0.0)
@@ -98,7 +98,7 @@ class TestNoiseSikes:
 class TestMagDisturbance:
 
     def test_mag_field_doubled_rejected(self, eskf):
-        """Doubled mag field norm should trigger rejection."""
+        # someone put a magnet nearby, filter should bail
         run_predict_steps(eskf, 100)
 
         # Normal mag updates
@@ -117,7 +117,7 @@ class TestMagDisturbance:
 class TestBiasExplosion:
 
     def test_large_bias_clamped(self, eskf):
-        """Artificially large biases should be clamped."""
+        # force huge biases, they should get clamped
         eskf.x[10:13] = [5.0, 5.0, 5.0]  # way over limit
         run_predict_steps(eskf, 10)
 
@@ -128,13 +128,13 @@ class TestBiasExplosion:
 class TestCovarianceHealth:
 
     def test_nan_detection(self, eskf):
-        """NaN in state should trigger FAULT."""
+        # inject NaN, should immediately go FAULT
         eskf.x[0] = float('nan')
         eskf._check_health()
         assert eskf.health == EKFHealth.FAULT
 
     def test_symmetry_enforcement(self, eskf):
-        """P should remain symmetric after enforcement."""
+        # covariance must stay symmetric or bad things happen
         eskf.P[0, 1] = 1.0
         eskf.P[1, 0] = 0.5  # asymmetric
         eskf._step_count = eskf.SYMMETRY_INTERVAL - 1
@@ -187,7 +187,7 @@ class TestQuaternionMath:
 class TestJacobianValidation:
 
     def test_F_analytical_vs_numerical(self, eskf):
-        """Verify analytical Jacobian against finite-difference."""
+        # math check: does our jacobian match numerical differentiation?
         accel = np.array([0.1, -0.2, -9.8])
         gyro = np.array([0.01, -0.02, 0.03])
         dt = 0.01

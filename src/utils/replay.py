@@ -18,12 +18,7 @@ from logger.struct_log import StructuredLogger
 
 
 class LogReplay:
-    """
-    Deterministic offline replay engine.
-
-    Feeds stored sensor data through a fresh ESKF instance
-    and records full state output for comparison.
-    """
+    # the time machine — feed old flight data through a fresh filter
 
     def __init__(self, noise_config: str = None):
         if noise_config:
@@ -35,12 +30,7 @@ class LogReplay:
         self._record_count = 0
 
     def replay_jsonl(self, input_path: str, output_dir: str = "logs"):
-        """
-        Replay a JSONL structured log.
-
-        Extracts state vectors from each record and uses them as
-        pseudo-measurements to step the ESKF forward deterministically.
-        """
+        # crack open a log file and relive the magic (or the crash)
         os.makedirs(output_dir, exist_ok=True)
         basename = os.path.splitext(os.path.basename(input_path))[0]
         output_path = os.path.join(output_dir, f"{basename}_replay.jsonl")
@@ -65,7 +55,7 @@ class LogReplay:
             log.error("Not enough records for replay")
             return
 
-        # Initialize ESKF
+        # wake up the filter
         self.eskf._initialized = True
         self.eskf.x[6:10] = self.eskf._euler_to_quat(0, 0, 0)
 
@@ -92,20 +82,20 @@ class LogReplay:
             accel = np.array([0.0, 0.0, -9.80665])
             gyro = np.zeros(3)
 
-            # Step the filter
+            # let the math do its thing
             self.eskf.predict(accel, gyro, dt)
 
-            # Apply baro correction (from stored position z)
+            # baro says we're at this altitude
             pos_z = rec["state"]["pos"][2]
             if i % 10 == 0:
                 self.eskf.update_baro(pos_z)
 
-            # Apply mag correction (from stored yaw)
+            # compass says we're pointing this way
             euler = rec["state"]["euler"]
             if i % 5 == 0:
                 self.eskf.update_mag(euler[2])
 
-            # Log replay state
+            # write down what happened
             s_logger.log_state(
                 t=t,
                 state=self.eskf.state,
@@ -125,12 +115,7 @@ class LogReplay:
         return s_logger.filepath
 
     def replay_mavlink(self, input_path: str, output_dir: str = "logs"):
-        """
-        Replay a MAVLink .tlog or .bin log.
-
-        Requires pymavlink. Parses RAW_IMU, SCALED_PRESSURE, and
-        RAW_IMU messages to drive the ESKF.
-        """
+        # same thing but for raw mavlink recordings from the pixhawk
         try:
             from pymavlink import mavutil
         except ImportError:
@@ -156,7 +141,7 @@ class LogReplay:
             mtype = msg.get_type()
 
             if mtype == "RAW_IMU":
-                # Convert from milli-units
+                # pixhawk sends everything in milli-whatevers
                 accel = np.array([
                     msg.xacc / 1000.0 * 9.80665,
                     msg.yacc / 1000.0 * 9.80665,
@@ -193,11 +178,11 @@ class LogReplay:
 
             elif mtype == "SCALED_PRESSURE":
                 if self.eskf._initialized:
-                    # Convert pressure to altitude (simplified)
+                    # pressure to meters, the lazy way
                     alt = (1013.25 - msg.press_abs) * 8.3
                     self.eskf.update_baro(alt)
 
-        # Log final state
+        # one last snapshot before we close
         if self.eskf._initialized:
             s_logger.log_state(
                 t=0.0,

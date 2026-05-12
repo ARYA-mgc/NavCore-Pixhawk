@@ -13,7 +13,7 @@ CHI2_1DOF = 5.991
 
 
 class UWBAnchor:
-    """Known UWB anchor with position and measurement history."""
+    # Known UWB anchor with position and measurement history.
     def __init__(self, anchor_id: str, position: np.ndarray):
         self.id = anchor_id
         self.position = np.array(position, dtype=float)  # NED (3,)
@@ -25,7 +25,7 @@ class UWBAnchor:
 
     @property
     def is_stale(self) -> bool:
-        """Consider stale if no update in 2 seconds."""
+        # Consider stale if no update in 2 seconds.
         return self.last_t == 0.0
 
     def staleness(self, t_now: float) -> float:
@@ -35,13 +35,7 @@ class UWBAnchor:
 
 
 class UWBFusion:
-    """
-    Ultra-Wideband range fusion for the ESKF.
-
-    Each range measurement from a known anchor produces a 1-DOF
-    range-only update with a nonlinear observation model that is
-    linearised around the current position estimate.
-    """
+    # Ultra-Wideband range fusion for the ESKF.
 
     RANGE_STD = 0.15        # meters (typical DW1000)
     MAX_RANGE = 100.0       # meters
@@ -68,30 +62,19 @@ class UWBFusion:
         return len(self._anchors)
 
     def add_anchor(self, anchor_id: str, position: np.ndarray):
-        """Register a UWB anchor at a known NED position."""
+        # Register a UWB anchor at a known NED position.
         self._anchors[anchor_id] = UWBAnchor(anchor_id, np.asarray(position))
         log.info(f"UWB anchor '{anchor_id}' registered at {position}")
 
     def remove_anchor(self, anchor_id: str):
-        """Remove an anchor."""
+        # Remove an anchor.
         if anchor_id in self._anchors:
             del self._anchors[anchor_id]
             log.info(f"UWB anchor '{anchor_id}' removed")
 
     def process_range(self, anchor_id: str, range_m: float, t: float,
                       current_pos: np.ndarray) -> Optional[dict]:
-        """
-        Process a single range measurement and produce an ESKF update.
-
-        Args:
-            anchor_id: Ranging anchor ID.
-            range_m: Measured range (meters).
-            t: Timestamp (seconds).
-            current_pos: (3,) current ESKF position estimate (NED).
-
-        Returns:
-            Dict with H, innovation, R for ESKF, or None if rejected.
-        """
+        # Process a single range measurement and produce an ESKF update.
         if not self._enabled:
             return None
 
@@ -158,19 +141,7 @@ class UWBFusion:
     def trilaterate(self, current_pos: np.ndarray,
                     t_now: float,
                     max_age: float = 1.0) -> Optional[np.ndarray]:
-        """
-        Least-squares position estimate from multiple recent ranges.
-
-        Uses iterative Gauss-Newton starting from current_pos.
-
-        Args:
-            current_pos: (3,) initial position guess (NED).
-            t_now: Current time for staleness filtering.
-            max_age: Max age of range measurements (seconds).
-
-        Returns:
-            (3,) NED position estimate, or None if insufficient anchors.
-        """
+        # Least-squares position estimate from multiple recent ranges.
         if not self._enabled:
             return None
 
@@ -221,7 +192,7 @@ class UWBFusion:
         return pos_est
 
     def get_status(self) -> dict:
-        """Return status of all anchors."""
+        # Return status of all anchors.
         return {
             "enabled": self._enabled,
             "anchor_count": len(self._anchors),

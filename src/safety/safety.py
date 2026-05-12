@@ -10,7 +10,7 @@ log = logging.getLogger("safety_monitor")
 
 
 class SafetyAction(Enum):
-    """Safety layer decision."""
+    # what should we do — fly, warn, or panic?
     NOMINAL = 0           # All clear — inject normally
     WARN = 1              # Elevated but acceptable — log warning
     LIMIT = 2             # Apply output limiting (clamp)
@@ -19,11 +19,7 @@ class SafetyAction(Enum):
 
 
 class SafetyMonitor:
-    """
-    Enforces hard safety bounds on estimator output.
-
-    Never modifies the estimator state — only gates the output.
-    """
+    # the guardrails — won't let you fly into a mountain
 
     def __init__(self,
                  max_horizontal_vel: float = 30.0,
@@ -63,17 +59,7 @@ class SafetyMonitor:
 
     def check(self, pos: np.ndarray, vel: np.ndarray,
               euler_rad: np.ndarray) -> SafetyAction:
-        """
-        Check estimator output against safety bounds.
-
-        Parameters:
-            pos: [x, y, z] NED position (m)
-            vel: [vx, vy, vz] NED velocity (m/s)
-            euler_rad: [roll, pitch, yaw] in radians
-
-        Returns:
-            SafetyAction indicating what the output layer should do.
-        """
+        # is the filter's output reasonable or insane?
         self.stats["total_checks"] += 1
         violations = []
 
@@ -165,11 +151,11 @@ class SafetyMonitor:
 
     @property
     def is_injection_safe(self) -> bool:
-        """True if latest check allows injection."""
+        # are we safe to keep using this data?
         return self._last_action.value < SafetyAction.DISABLE_INJECTION.value
 
     def reset(self):
-        """Reset state after recovery."""
+        # all clear, reset the warning counters
         self._last_pos = None
         self._consecutive_violations = 0
         self._last_action = SafetyAction.NOMINAL

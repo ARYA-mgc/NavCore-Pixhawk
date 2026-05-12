@@ -17,17 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 def compute_allan_variance(data: np.ndarray, dt: float,
                            max_clusters: int = 100) -> tuple:
-    """
-    Compute overlapping Allan Variance for a 1D time series.
-
-    Args:
-        data: 1D array of sensor samples (e.g., accel_x or gyro_z).
-        dt: Sample period in seconds.
-        max_clusters: Maximum number of cluster sizes to evaluate.
-
-    Returns:
-        (taus, avars): Arrays of cluster times and Allan variances.
-    """
+    # crunch the numbers on sensor noise characteristics
     N = len(data)
     if N < 10:
         raise ValueError(f"Need at least 10 samples, got {N}")
@@ -64,13 +54,7 @@ def compute_allan_variance(data: np.ndarray, dt: float,
 
 
 def fit_noise_parameters(taus: np.ndarray, adevs: np.ndarray) -> dict:
-    """
-    Fit white noise and bias instability from Allan Deviation curve.
-
-    Returns dict with:
-        white_noise: σ of white noise (units of input)
-        bias_instability: σ of bias (units of input)
-    """
+    # extract the useful noise params from the allan curve
     log_taus = np.log10(taus)
     log_adevs = np.log10(adevs)
 
@@ -98,15 +82,7 @@ def fit_noise_parameters(taus: np.ndarray, adevs: np.ndarray) -> dict:
 
 def analyze_stationary_log(filepath: str,
                            imu_rate_hz: float = 100.0) -> dict:
-    """
-    Analyze a JSONL structured log from a stationary vehicle.
-
-    Extracts accel and gyro data, computes Allan Variance for each
-    axis, and fits noise parameters.
-
-    Returns:
-        Dict with fitted parameters for accel and gyro axes.
-    """
+    # sit the drone on a table and stare at its noise for hours
     dt = 1.0 / imu_rate_hz
 
     # Parse log
@@ -162,9 +138,7 @@ def analyze_stationary_log(filepath: str,
 
 
 def generate_tuned_yaml(results: dict, output_path: str = "config/noise_params_tuned.yaml"):
-    """
-    Write a tuned noise_params.yaml based on Allan Variance analysis.
-    """
+    # spit out a tuned config based on what we measured
     # Average across axes
     accel_wn = np.mean([results[f"accel_{a}"]["white_noise"] for a in "xyz"])
     accel_bi = np.mean([results[f"accel_{a}"]["bias_instability"] for a in "xyz"])

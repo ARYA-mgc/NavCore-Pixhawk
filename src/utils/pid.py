@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""
-adaptive_pid.py
-================
-Adaptive PID Controller for drone navigation and control.
-Adjusts P, I, D gains dynamically based on error magnitude.
-"""
+# PID that learns on the fly — gains adjust based on error
 
 import math
 
@@ -54,7 +49,7 @@ class AdaptivePID:
         return p_term + i_term + d_term
 
     def get_gains(self) -> tuple:
-        """Returns the current adapted gains (Kp, Ki, Kd)"""
+        # what are the gains right now?
         return self.kp, self.ki, self.kd
 
     def reset(self):

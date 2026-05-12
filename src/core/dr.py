@@ -9,10 +9,7 @@ GRAVITY = np.array([0.0, 0.0, 9.80665])
 
 
 class DeadReckon:
-    """
-    Simple strapdown dead reckoning.
-    Integrates raw IMU directly — no correction.
-    """
+    # when sensors die, we just wing it with pure integration
 
     def __init__(self, noise: IMUNoiseParams):
         self.pos   = np.zeros(3)

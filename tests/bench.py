@@ -21,14 +21,7 @@ rng = np.random.default_rng(42)
 
 
 def generate_true_trajectory(dt, duration):
-    """
-    Simulate a 30-second UAV flight:
-      0-5 s   : vertical climb to 20 m
-      5-15 s  : figure-8
-      15-25 s : banked turn
-      25-30 s : descent
-    Returns arrays of true pos, vel, euler.
-    """
+    # Simulate a 30-second UAV flight:
     N    = int(duration / dt)
     t    = np.arange(N) * dt
     pos  = np.zeros((N, 3))
@@ -58,10 +51,7 @@ def generate_true_trajectory(dt, duration):
 
 
 def simulate_imu(true_pos, true_vel, true_euler, dt, noise: IMUNoiseParams):
-    """
-    Generate noisy IMU measurements from true trajectory.
-    Specific force = R_nb * (a_ned - g_ned)  where g_ned = [0,0,+g]
-    """
+    # Generate noisy IMU measurements from true trajectory.
     N = len(true_euler)
     accel_arr = np.zeros((N, 3))
     gyro_arr  = np.zeros((N, 3))
@@ -118,7 +108,7 @@ def run_benchmark(dt):
     eskf  = ESKF(noise)
     dr    = DeadReckon(noise)
 
-    # Initialize ESKF with known attitude (simulation starts level, north)
+    # wake up the filter with known attitude (simulation starts level, north)
     eskf.x[6:10] = eskf._euler_to_quat(0, 0, 0)
     eskf._initialized = True
 

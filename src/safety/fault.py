@@ -11,7 +11,7 @@ log = logging.getLogger("fault_manager")
 
 
 class FlightMode(Enum):
-    """INS operating mode."""
+    # what mode are we in right now
     NOMINAL    = auto()   # All sensors healthy, full ESKF
     DEGRADED   = auto()   # Some sensors missing, reduced accuracy
     FAILSAFE   = auto()   # Critical sensor loss, dead-reckoning only
@@ -19,7 +19,7 @@ class FlightMode(Enum):
 
 
 class SensorStatus(Enum):
-    """Per-sensor health state."""
+    # is this sensor alive, sick, or dead?
     ACTIVE    = auto()
     STALE     = auto()   # No data for > timeout
     REJECTED  = auto()   # Data arriving but failing quality checks
@@ -28,7 +28,7 @@ class SensorStatus(Enum):
 
 @dataclass
 class SensorHealth:
-    """Tracks individual sensor liveness."""
+    # keeps tabs on each sensor's heartbeat
     name: str
     status: SensorStatus = SensorStatus.OFFLINE
     last_update_t: float = 0.0
@@ -38,18 +38,18 @@ class SensorHealth:
     rejected_samples: int = 0
 
     def mark_active(self, t: float):
-        """Record a successful sensor update."""
+        # sensor checked in, all good
         self.status = SensorStatus.ACTIVE
         self.last_update_t = t
         self.total_samples += 1
 
     def mark_rejected(self, t: float):
-        """Record a rejected sensor sample."""
+        # sensor gave us garbage, noted
         self.rejected_samples += 1
         self.last_update_t = t
 
     def check_staleness(self, t_now: float):
-        """Check if sensor has gone stale."""
+        # has this sensor gone quiet on us?
         if self.status == SensorStatus.OFFLINE:
             return
         if t_now - self.last_update_t > self.timeout_s:
@@ -66,12 +66,7 @@ class SensorHealth:
 
 
 class FaultManager:
-    """
-    High-level fault supervisor.
-
-    Monitors sensor health, decides operating mode, and manages
-    EKF reset / recovery sequences.
-    """
+    # the boss — watches all sensors and decides if we're okay to fly
 
     # Hysteresis: require N consecutive good cycles before recovery
     RECOVERY_THRESHOLD = 50
@@ -104,7 +99,7 @@ class FaultManager:
 
     def report_sensor_update(self, sensor_name: str, t: float,
                              rejected: bool = False):
-        """Called by main loop when a sensor delivers data."""
+        # main loop calls this when new data arrives
         if sensor_name not in self.sensors:
             return
 
@@ -116,17 +111,7 @@ class FaultManager:
 
     def update(self, t_now: float, ekf_healthy: bool,
                safety_ok: bool) -> FlightMode:
-        """
-        Evaluate system health and determine operating mode.
-
-        Args:
-            t_now: Current timestamp.
-            ekf_healthy: Whether the ESKF reports HEALTHY.
-            safety_ok: Whether SafetyMonitor says no faults.
-
-        Returns:
-            Current FlightMode after evaluation.
-        """
+        # Evaluate system health and determine operating mode.
         # Check sensor staleness
         for sh in self.sensors.values():
             sh.check_staleness(t_now)
@@ -168,7 +153,7 @@ class FaultManager:
 
     def _evaluate_mode(self, imu_ok: bool, baro_ok: bool, mag_ok: bool,
                        ekf_healthy: bool, safety_ok: bool) -> FlightMode:
-        """Pure logic: given sensor states, determine target mode."""
+        # the decision tree — what mode should we be in?
         # EMERGENCY: no IMU or estimator diverged
         if not imu_ok:
             return FlightMode.EMERGENCY
@@ -188,7 +173,7 @@ class FaultManager:
         return FlightMode.NOMINAL
 
     def _transition(self, new_mode: FlightMode, t: float):
-        """Execute a mode transition."""
+        # switch to a new mode and deal with the consequences
         if new_mode == self._mode:
             return
 
@@ -210,12 +195,7 @@ class FaultManager:
         log.log(level, msg)
 
     def should_reset_ekf(self) -> bool:
-        """
-        Determine if the ESKF should be reset.
-
-        Returns True once per EMERGENCY entry to attempt recovery.
-        Subsequent calls return False until mode changes again.
-        """
+        # Determine if the ESKF should be reset.
         if self._mode == FlightMode.EMERGENCY:
             if self._ekf_reset_count == 0 or self._prev_mode != FlightMode.EMERGENCY:
                 self._ekf_reset_count += 1
@@ -224,7 +204,7 @@ class FaultManager:
         return False
 
     def get_status_summary(self) -> dict:
-        """Return a snapshot of all sensor health and system mode."""
+        # health report — everything at a glance
         return {
             "mode": self._mode.name,
             "sensors": {

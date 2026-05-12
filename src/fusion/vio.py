@@ -14,7 +14,7 @@ CHI2_1DOF = 5.991
 
 
 def _quat_to_rotation(q: np.ndarray) -> np.ndarray:
-    """Quaternion [w,x,y,z] to 3x3 rotation matrix."""
+    # quat to rotation matrix
     w, x, y, z = q
     return np.array([
         [1 - 2*(y*y + z*z),   2*(x*y - w*z),     2*(x*z + w*y)],
@@ -24,13 +24,13 @@ def _quat_to_rotation(q: np.ndarray) -> np.ndarray:
 
 
 def _quat_to_yaw(q: np.ndarray) -> float:
-    """Extract yaw from quaternion [w,x,y,z]."""
+    # Extract yaw from quaternion [w,x,y,z].
     w, x, y, z = q
     return math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
 
 
 def _quat_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
-    """Hamilton product of two quaternions [w,x,y,z]."""
+    # Hamilton product of two quaternions [w,x,y,z].
     w1, x1, y1, z1 = q1
     w2, x2, y2, z2 = q2
     return np.array([
@@ -42,18 +42,12 @@ def _quat_multiply(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
 
 
 def _quat_inverse(q: np.ndarray) -> np.ndarray:
-    """Inverse of a unit quaternion."""
+    # Inverse of a unit quaternion.
     return np.array([q[0], -q[1], -q[2], -q[3]])
 
 
 class VIOPipeline:
-    """
-    Visual Inertial Odometry fusion for the ESKF.
-
-    Converts VIO poses from camera frame to NED, applies
-    innovation gating, and produces position + yaw measurement
-    vectors for the ESKF.
-    """
+    # Visual Inertial Odometry fusion for the ESKF.
 
     # Measurement noise (position and yaw)
     POS_STD = 0.05    # m — typical T265 / ORB-SLAM3
@@ -111,19 +105,7 @@ class VIOPipeline:
 
     def initialize(self, eskf_pos: np.ndarray, eskf_quat: np.ndarray,
                    vio_pos: np.ndarray, vio_quat: np.ndarray):
-        """
-        Compute VIO→NED alignment from a matched pose pair.
-
-        Call this once when the ESKF is converged and VIO tracking
-        has started. The transform is then applied to all future
-        VIO updates.
-
-        Args:
-            eskf_pos: (3,) ESKF position in NED
-            eskf_quat: (4,) ESKF quaternion [w,x,y,z]
-            vio_pos: (3,) VIO position in VIO frame
-            vio_quat: (4,) VIO quaternion [w,x,y,z]
-        """
+        # Compute VIO→NED alignment from a matched pose pair.
         if not self._enabled:
             return
 
@@ -151,18 +133,7 @@ class VIOPipeline:
                            position: np.ndarray,
                            orientation: np.ndarray,
                            confidence: float = 1.0) -> Optional[dict]:
-        """
-        Process an incoming VIO pose and produce ESKF measurements.
-
-        Args:
-            t: Timestamp (seconds).
-            position: (3,) VIO position in VIO frame.
-            orientation: (4,) quaternion [w,x,y,z] in VIO frame.
-            confidence: 0.0-1.0 tracking quality.
-
-        Returns:
-            Dict with measurement data for ESKF, or None if rejected.
-        """
+        # Process an incoming VIO pose and produce ESKF measurements.
         if not self.is_active:
             return None
 

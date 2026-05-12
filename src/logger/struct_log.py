@@ -10,7 +10,7 @@ log = logging.getLogger("structured_logger")
 
 
 class NumpyEncoder(json.JSONEncoder):
-    """Custom encoder for numpy data types."""
+    # teach json how to handle numpy arrays
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -38,9 +38,7 @@ class StructuredLogger:
 
     def log_state(self, t: float, state: dict, covariance: np.ndarray, 
                   health_status: str, safety_action: str, timing_ms: float):
-        """
-        Log the full estimator state, covariance metrics, and health.
-        """
+        # write everything the filter knows to the log
         if self._file is None:
             return
             
@@ -68,9 +66,7 @@ class StructuredLogger:
 
     def log_innovation(self, t: float, sensor: str, nis: float, 
                        y: np.ndarray, S: np.ndarray, rejected: bool):
-        """
-        Log measurement innovations for offline tuning (Allan variance/RMSE).
-        """
+        # log the innovation stats for nerds who want to tune later
         if self._file is None:
             return
             

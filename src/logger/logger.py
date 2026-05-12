@@ -12,12 +12,7 @@ log = logging.getLogger("ins_logger")
 
 
 class INSLogger:
-    """
-    CSV logger for EKF state.
-    Columns:
-      time_s, px, py, pz, vx, vy, vz, roll_deg, pitch_deg, yaw_deg,
-      P_trace  (sum of diagonal covariance — overall uncertainty)
-    """
+    # dumps state to CSV — one row per timestep, simple and fast
 
     HEADER = [
         "time_s",

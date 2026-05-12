@@ -35,7 +35,7 @@ def dr(noise):
 class TestESKF:
 
     def test_initial_quaternion_identity(self, eskf):
-        """Initial attitude should be identity quaternion [1,0,0,0]."""
+        # should start perfectly level and pointing north
         assert abs(eskf.x[6] - 1.0) < 1e-10
         assert np.allclose(eskf.x[7:10], 0.0)
 
@@ -44,7 +44,7 @@ class TestESKF:
         assert np.all(eigvals > 0), "Initial P must be positive definite"
 
     def test_predict_increases_uncertainty(self, eskf):
-        """Covariance trace should grow when predicting with no updates."""
+        # no sensor updates = growing uncertainty
         trace_before = np.trace(eskf.P)
         accel = np.array([0.0, 0.0, -9.80665])  # hovering
         gyro  = np.zeros(3)
@@ -54,7 +54,7 @@ class TestESKF:
         assert trace_after > trace_before
 
     def test_predict_gravity_stationary(self, eskf):
-        """Stationary hover: position should stay near zero."""
+        # sitting still should mean staying at zero
         accel = np.array([0.0, 0.0, -9.80665])
         gyro  = np.zeros(3)
         for _ in range(100):
@@ -64,7 +64,7 @@ class TestESKF:
         assert np.linalg.norm(pos) < 1.0
 
     def test_baro_update_corrects_altitude(self, eskf):
-        """Baro updates should reduce altitude error over time."""
+        # baro should pull altitude toward the right answer
         accel = np.array([0.0, 0.0, -9.80665])
         # Gradually introduce baro readings to stay within gating
         for i in range(300):
@@ -76,7 +76,7 @@ class TestESKF:
         assert abs(eskf.state["pos"][2] - 0.5) < 1.0
 
     def test_mag_update_sets_yaw(self, eskf):
-        """Mag updates should pull yaw toward measurement over time."""
+        # compass should slowly fix our heading
         target_yaw = math.radians(20.0)  # smaller angle for convergence
         accel = np.array([0.0, 0.0, -9.80665])
         for i in range(500):
@@ -87,7 +87,7 @@ class TestESKF:
         assert abs(yaw - target_yaw) < math.radians(15.0)
 
     def test_covariance_decreases_after_update(self, eskf):
-        """Covariance trace should decrease after a measurement update."""
+        # measurements = less uncertainty, always
         accel = np.array([0.0, 0.0, -9.80665])
         for _ in range(20):
             eskf.predict(accel, np.zeros(3), 0.01)
@@ -107,7 +107,7 @@ class TestESKF:
         assert e.health == EKFHealth.CONVERGING
 
     def test_health_becomes_healthy(self, eskf):
-        """After enough predict steps with corrections, health should be HEALTHY."""
+        # run it long enough with corrections and it should settle
         accel = np.array([0.0, 0.0, -9.80665])
         rng = np.random.default_rng(42)
         for i in range(300):
@@ -130,7 +130,7 @@ class TestDeadReckon:
         assert np.linalg.norm(dr.pos) < 2.0   # some drift expected
 
     def test_forward_motion(self, dr):
-        """Small forward accel should produce positive px."""
+        # push forward, position should increase
         accel = np.array([0.5, 0.0, -9.80665])
         gyro  = np.zeros(3)
         for _ in range(100):

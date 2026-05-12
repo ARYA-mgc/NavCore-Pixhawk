@@ -21,7 +21,7 @@ class LoopMonitor:
         self._apply_rt_hints()
 
     def _apply_rt_hints(self):
-        """Attempt to set high process priority."""
+        # beg the OS for more CPU time
         try:
             if os.name == 'posix':
                 # Nice value (requires root for negative values)
@@ -36,7 +36,7 @@ class LoopMonitor:
             log.debug(f"Could not set RT priority: {e}")
 
     def record_loop(self, loop_ms: float):
-        """Record a single iteration time."""
+        # how long did this loop take?
         self._loop_times_ms.append(loop_ms)
         if loop_ms > self._max_loop_ms:
             self._max_loop_ms = loop_ms
@@ -47,7 +47,7 @@ class LoopMonitor:
                 log.warning(f"Loop overrun: {loop_ms:.1f}ms (target {self.target_ms:.0f}ms)")
 
     def get_stats(self):
-        """Returns statistics for logging/display."""
+        # timing stats for the curious
         if not self._loop_times_ms:
             return {"avg": 0.0, "max": 0.0, "p99": 0.0, "overruns": 0}
             
@@ -60,7 +60,7 @@ class LoopMonitor:
         }
 
     def print_histogram(self):
-        """Prints an ASCII histogram of loop times."""
+        # draw a lil bar chart of how consistent the loop is
         if not self._loop_times_ms:
             return
             

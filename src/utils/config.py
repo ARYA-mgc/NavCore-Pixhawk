@@ -11,7 +11,7 @@ log = logging.getLogger("config_loader")
 
 
 class ConfigError(Exception):
-    """Raised when configuration is invalid. Non-recoverable."""
+    # config is broken and we refuse to fly with bad numbers
     pass
 
 
@@ -19,7 +19,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class _Bound:
-    """Min/max bounds for a single parameter."""
+    # guardrails for each config value
     lo: float
     hi: float
     required: bool = True
@@ -54,12 +54,7 @@ _KNOWN_SECTIONS = set(_SCHEMA.keys())
 
 
 def load_config(path: str) -> dict:
-    """
-    Load and strictly validate a YAML configuration file.
-
-    Returns a nested dict matching the schema.
-    Raises ConfigError on any violation.
-    """
+    # read the config, yell if anything looks wrong
     if not os.path.isfile(path):
         raise ConfigError(f"Config file not found: {path}")
 
@@ -145,10 +140,7 @@ def load_config(path: str) -> dict:
 
 
 def validate_or_die(path: str) -> dict:
-    """
-    Convenience wrapper. Loads config or prints error and exits.
-    Use this in main() entry points for fail-fast behavior.
-    """
+    # load config or die trying
     try:
         return load_config(path)
     except ConfigError as e:

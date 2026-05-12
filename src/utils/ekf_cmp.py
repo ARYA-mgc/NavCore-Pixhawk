@@ -26,7 +26,7 @@ class StateSnapshot:
 # ── Loaders ──────────────────────────────────────────────────
 
 def load_eskf_jsonl(path: str) -> List[StateSnapshot]:
-    """Load NavCore ESKF states from JSONL structured log."""
+    # grab our filter's output from the log
     states = []
     with open(path, "r") as f:
         for line in f:
@@ -52,11 +52,7 @@ def load_eskf_jsonl(path: str) -> List[StateSnapshot]:
 
 
 def load_ekf3_csv(path: str) -> List[StateSnapshot]:
-    """
-    Load ArduPilot EKF3 state export CSV.
-    Columns: time_s, x_m, y_m, z_m, vx, vy, vz, roll, pitch, yaw
-    (angles in degrees).
-    """
+    # Load ArduPilot EKF3 state export CSV.
     states = []
     with open(path, "r") as f:
         reader = csv.DictReader(f)
@@ -87,7 +83,7 @@ def load_ekf3_csv(path: str) -> List[StateSnapshot]:
 def align_states(eskf: List[StateSnapshot],
                  ekf3: List[StateSnapshot],
                  max_dt: float = 0.05) -> List[Tuple[StateSnapshot, StateSnapshot]]:
-    """Align ESKF and EKF3 states by nearest timestamp."""
+    # line up both filters' data by time
     pairs = []
     ekf3_times = np.array([s.t for s in ekf3])
 
@@ -103,12 +99,7 @@ def align_states(eskf: List[StateSnapshot],
 # ── Divergence Metrics ──────────────────────────────────────
 
 def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict:
-    """
-    Compute per-axis divergence between ESKF and EKF3.
-
-    Returns:
-        Dict with position, velocity, and attitude divergence stats.
-    """
+    # Compute per-axis divergence between ESKF and EKF3.
     pos_errs = np.array([p[0].pos - p[1].pos for p in pairs])
     vel_errs = np.array([p[0].vel - p[1].vel for p in pairs])
 
@@ -150,7 +141,7 @@ def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict
 
 
 def print_comparison(results: dict):
-    """Pretty-print comparison results."""
+    # show the scoreboard
     print(f"\n{'='*60}")
     print(f"ESKF vs EKF3 DIVERGENCE ANALYSIS")
     print(f"{'='*60}")

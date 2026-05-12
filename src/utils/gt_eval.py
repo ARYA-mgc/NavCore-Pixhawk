@@ -28,10 +28,7 @@ class Pose:
 # ── Loaders ──────────────────────────────────────────────────
 
 def load_ground_truth_csv(path: str) -> List[Pose]:
-    """
-    Load ground-truth CSV.
-    Columns: time_s, x_m, y_m, z_m, qw, qx, qy, qz, vx_mps, vy_mps, vz_mps
-    """
+    # load the RTK data (the 'right' answer)
     poses = []
     with open(path, "r") as f:
         reader = csv.DictReader(f)
@@ -58,9 +55,7 @@ def load_ground_truth_csv(path: str) -> List[Pose]:
 
 
 def load_estimate_jsonl(path: str) -> List[Pose]:
-    """
-    Load ESKF estimate from structured JSONL log.
-    """
+    # load what our filter thought happened
     poses = []
     with open(path, "r") as f:
         for line in f:
@@ -89,10 +84,7 @@ def load_estimate_jsonl(path: str) -> List[Pose]:
 
 def align_timestamps(est: List[Pose], gt: List[Pose],
                      max_dt: float = 0.05) -> List[Tuple[Pose, Pose]]:
-    """
-    Associate estimate poses to ground-truth poses by nearest
-    timestamp. Discard any pair with time gap > max_dt.
-    """
+    # Associate estimate poses to ground-truth poses by nearest
     pairs = []
     gt_times = np.array([p.t for p in gt])
 
@@ -110,17 +102,7 @@ def align_timestamps(est: List[Pose], gt: List[Pose],
 
 def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
                       with_scale: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
-    """
-    Umeyama alignment: find R, t, s such that dst ≈ s*R*src + t.
-
-    Args:
-        src: (N, 3) source points (estimate).
-        dst: (N, 3) destination points (ground truth).
-        with_scale: Whether to compute scale factor.
-
-    Returns:
-        (R, t, s): Rotation (3x3), translation (3,), scale.
-    """
+    # Umeyama alignment: find R, t, s such that dst ≈ s*R*src + t.
     assert src.shape == dst.shape
     n, m = src.shape
 
@@ -150,11 +132,7 @@ def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
 
 def compute_ape(pairs: List[Tuple[Pose, Pose]],
                 align: bool = True) -> dict:
-    """
-    Compute Absolute Pose Error (APE).
-
-    Returns dict with: rmse, mean, median, max, std, errors.
-    """
+    # Compute Absolute Pose Error (APE).
     est_pos = np.array([p[0].pos for p in pairs])
     gt_pos  = np.array([p[1].pos for p in pairs])
 
@@ -178,14 +156,7 @@ def compute_ape(pairs: List[Tuple[Pose, Pose]],
 
 def compute_rpe(pairs: List[Tuple[Pose, Pose]],
                 delta: int = 10) -> dict:
-    """
-    Compute Relative Pose Error (RPE) at fixed index intervals.
-
-    Args:
-        delta: Number of pose indices between pairs.
-
-    Returns dict with: rmse, mean, median, max, std, errors.
-    """
+    # Compute Relative Pose Error (RPE) at fixed index intervals.
     if len(pairs) <= delta:
         log.warning(f"Not enough pairs for RPE with delta={delta}")
         return {"rmse": 0, "mean": 0, "median": 0, "max": 0, "std": 0}
@@ -213,7 +184,7 @@ def compute_rpe(pairs: List[Tuple[Pose, Pose]],
 
 
 def print_results(ape: dict, rpe: dict):
-    """Pretty-print evaluation results."""
+    # print the report card
     print(f"\n{'='*60}")
     print(f"GROUND TRUTH EVALUATION RESULTS")
     print(f"{'='*60}")

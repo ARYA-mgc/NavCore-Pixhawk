@@ -18,11 +18,7 @@ class TimeSynchronizer:
         self._alpha = 0.1  # smoothing factor
 
     def compute_dt(self, msg) -> float:
-        """
-        Computes the exact time delta (dt) since the last message
-        using the message's internal hardware timestamp if available.
-        Falls back to system clock if not available or corrupt.
-        """
+        # figure out exactly how much time passed since last reading
         now_s = time.monotonic()
         
         # Determine current message timestamp (usec)

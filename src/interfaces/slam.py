@@ -14,7 +14,7 @@ CHI2_1DOF = 5.991
 
 
 def _quat_to_rotation(q: np.ndarray) -> np.ndarray:
-    """Quaternion [w,x,y,z] to 3x3 rotation matrix."""
+    # quat to rotation matrix
     w, x, y, z = q
     return np.array([
         [1 - 2*(y*y + z*z),   2*(x*y - w*z),     2*(x*z + w*y)],
@@ -24,7 +24,7 @@ def _quat_to_rotation(q: np.ndarray) -> np.ndarray:
 
 
 def _rotation_to_quat(R: np.ndarray) -> np.ndarray:
-    """3x3 rotation matrix to quaternion [w,x,y,z]."""
+    # rotation matrix back to quat
     trace = np.trace(R)
     if trace > 0:
         s = 0.5 / math.sqrt(trace + 1.0)
@@ -75,12 +75,7 @@ def _quat_inverse(q):
 
 
 class SLAMInterface:
-    """
-    SLAM pose injection with frame alignment and loop closure handling.
-
-    Produces position (3-DOF) and yaw (1-DOF) measurements for
-    the 15-state ESKF error state.
-    """
+    # takes SLAM poses, aligns them to NED, and feeds the filter
 
     POS_STD = 0.10           # m — typical ORB-SLAM3
     YAW_STD = 0.05           # rad (~3 deg)
@@ -127,13 +122,7 @@ class SLAMInterface:
         return self._loop_closure_count
 
     def set_frame_transform(self, R: np.ndarray, t: np.ndarray):
-        """
-        Set the SLAM→NED rotation and translation directly.
-
-        Args:
-            R: (3,3) rotation matrix.
-            t: (3,) translation vector.
-        """
+        # manually set the frame transform
         self._R_slam_to_ned = R.copy()
         self._t_slam_to_ned = t.copy()
         self._q_slam_to_ned = _rotation_to_quat(R)
@@ -142,12 +131,7 @@ class SLAMInterface:
 
     def auto_align(self, slam_pos: np.ndarray, ned_pos: np.ndarray,
                    slam_quat: np.ndarray, ned_quat: np.ndarray):
-        """
-        Compute alignment from a single matched pose pair.
-
-        For best results, call when the ESKF is converged
-        and SLAM tracking has initialised.
-        """
+        # figure out the transform from one matched point
         if not self._enabled:
             return
 
@@ -160,14 +144,7 @@ class SLAMInterface:
         log.info("SLAM frame auto-aligned from pose pair")
 
     def umeyama_align(self, slam_points: np.ndarray, ned_points: np.ndarray):
-        """
-        Compute alignment from multiple matched point pairs using
-        the Umeyama method (least-squares rigid body transform).
-
-        Args:
-            slam_points: (N, 3) points in SLAM frame.
-            ned_points: (N, 3) corresponding points in NED frame.
-        """
+        # Compute alignment from multiple matched point pairs using
         if not self._enabled:
             return
 
@@ -202,19 +179,7 @@ class SLAMInterface:
                           orientation: np.ndarray,
                           covariance: Optional[np.ndarray] = None,
                           is_loop_closure: bool = False) -> Optional[dict]:
-        """
-        Transform a SLAM pose to NED and produce ESKF measurements.
-
-        Args:
-            t: Timestamp.
-            position: (3,) SLAM position.
-            orientation: (4,) SLAM quaternion [w,x,y,z].
-            covariance: Optional (6,6) pose covariance from SLAM.
-            is_loop_closure: Whether this is a loop closure correction.
-
-        Returns:
-            Dict with H, R, innovation data for ESKF, or None if rejected.
-        """
+        # convert a SLAM reading into something the filter understands
         if not self.is_active:
             return None
 

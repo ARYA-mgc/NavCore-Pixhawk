@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
-"""
-mavlink_bridge.py
-=================
-Low-level MAVLink interface to Pixhawk Cube Orange.
-
-Handles:
-  - Connection (UART / USB / TCP-SITL)
-  - Heartbeat handshake
-  - Data-stream rate requests  (REQUEST_DATA_STREAM / SET_MESSAGE_INTERVAL)
-  - Parsing:  RAW_IMU, SCALED_PRESSURE, SCALED_IMU3 (mag),
-              ATTITUDE, GPS_RAW_INT, STATUSTEXT
-  - RC override (emergency hold)
-  - Arm / Disarm helpers (for testing)
-
-Hardware wiring (Cube Orange → RPi 4)
---------------------------------------
-  Cube TELEM2  TX → RPi GPIO 15 (RXD)  /dev/ttyAMA0
-  Cube TELEM2  RX → RPi GPIO 14 (TXD)
-  Cube TELEM2 GND → RPi GND
-  Baud: 921600 recommended (set in Mission Planner SERIAL2_BAUD = 921)
-"""
+# mavlink_bridge.py
 
 import math
 import time
@@ -50,9 +30,7 @@ BARO_EXPONENT = 1.0 / 5.257
 
 # ────────────────────────────────────────────────────────────────
 class MAVLinkBridge:
-    """
-    Thread-safe MAVLink connection wrapper for Pixhawk Cube Orange.
-    """
+    # the phone line to the pixhawk — handles all the chatter
 
     def __init__(self, connection_string: str = "/dev/ttyAMA0",
                  baud: int = 921600):
@@ -67,12 +45,7 @@ class MAVLinkBridge:
 
     # ── connection ──────────────────────────────────────────────
     def connect(self):
-        """
-        Open MAVLink connection.  Supports:
-          /dev/ttyAMA0   — RPi GPIO UART (recommended, 921600 baud)
-          /dev/ttyACM0   — USB-FTDI / USB-C
-          tcp:IP:PORT    — Mission Planner / SITL forward
-        """
+        # Open MAVLink connection.  Supports:
         log.info(f"Opening MAVLink connection → {self.connection_string}")
         self._conn = mavutil.mavlink_connection(
             self.connection_string,
@@ -85,7 +58,7 @@ class MAVLinkBridge:
         log.info("MAVLink port opened")
 
     def wait_heartbeat(self, timeout: float = 30.0):
-        """Block until first heartbeat from autopilot."""
+        # wait for the pixhawk to say hi
         log.info("Waiting for heartbeat …")
         self._conn.wait_heartbeat(timeout=timeout)
         self.last_heartbeat_t = time.monotonic()
@@ -100,11 +73,7 @@ class MAVLinkBridge:
 
     # ── data stream requests ────────────────────────────────────
     def request_data_streams(self, hz: int = 100):
-        """
-        Ask Pixhawk to send sensor data at desired rate.
-        Uses both legacy REQUEST_DATA_STREAM and newer
-        SET_MESSAGE_INTERVAL for ArduPilot 4.x+.
-        """
+        # Ask Pixhawk to send sensor data at desired rate.
         conn = self._conn
         sysid = conn.target_system
         compid = conn.target_component
@@ -150,10 +119,7 @@ class MAVLinkBridge:
 
     # ── receive ─────────────────────────────────────────────────
     def recv_match(self, blocking: bool = True, timeout: float = 0.05):
-        """
-        Return next MAVLink message or None.
-        Filters: only messages from target autopilot.
-        """
+        # Return next MAVLink message or None.
         return self._conn.recv_match(
             blocking=blocking,
             timeout=timeout,
@@ -162,12 +128,7 @@ class MAVLinkBridge:
     # ── parsers ─────────────────────────────────────────────────
     @staticmethod
     def parse_raw_imu(msg) -> tuple:
-        """
-        RAW_IMU → (accel_m_s2[3], gyro_rad_s[3])
-        Units from Cube Orange ICM-42688:
-          xacc/yacc/zacc : raw LSB (need ACCEL_SCALE)
-          xgyro/ygyro/zgyro : raw LSB (need GYRO_SCALE)
-        """
+        # RAW_IMU → (accel_m_s2[3], gyro_rad_s[3])
         accel = np.array([
             msg.xacc * ACCEL_SCALE,
             msg.yacc * ACCEL_SCALE,
@@ -184,10 +145,7 @@ class MAVLinkBridge:
 
     @staticmethod
     def parse_scaled_imu(msg) -> tuple:
-        """
-        SCALED_IMU2 → (accel m/s², gyro rad/s)
-        Already scaled in milli-g and milli-rad/s.
-        """
+        # SCALED_IMU2 → (accel m/s², gyro rad/s)
         accel = np.array([
             msg.xacc * 1e-3 * 9.80665,
             msg.yacc * 1e-3 * 9.80665,
@@ -204,11 +162,7 @@ class MAVLinkBridge:
 
     @staticmethod
     def parse_baro(msg) -> float:
-        """
-        SCALED_PRESSURE / SCALED_PRESSURE2
-        Returns altitude in metres (MSL) via ISA formula.
-        press_abs is in hPa.
-        """
+        # SCALED_PRESSURE / SCALED_PRESSURE2
         p_hpa = msg.press_abs          # hecto-Pascals
         p_pa  = p_hpa * 100.0
         # ISA altitude
@@ -217,11 +171,7 @@ class MAVLinkBridge:
 
     @staticmethod
     def parse_mag_yaw(msg) -> float | None:
-        """
-        SCALED_IMU3 → yaw in radians.
-        xmag / ymag / zmag in milli-Gauss (Cube Orange RM3100).
-        Returns None if mag vector is near-zero (bad reading).
-        """
+        # SCALED_IMU3 → yaw in radians.
         mx = msg.xmag * MAG_SCALE
         my = msg.ymag * MAG_SCALE
         mz = msg.zmag * MAG_SCALE
@@ -236,7 +186,7 @@ class MAVLinkBridge:
 
     # ── command helpers ─────────────────────────────────────────
     def arm(self):
-        """Send ARM command (USE WITH CAUTION — props will spin)."""
+        # ARM — props WILL spin, don't lose a finger
         log.warning("Sending ARM command")
         self._conn.mav.command_long_send(
             self._conn.target_system,
@@ -247,7 +197,7 @@ class MAVLinkBridge:
         )
 
     def disarm(self, force: bool = False):
-        """Send DISARM command."""
+        # kill the motors, we're done
         log.info("Sending DISARM command")
         self._conn.mav.command_long_send(
             self._conn.target_system,
@@ -260,7 +210,7 @@ class MAVLinkBridge:
         )
 
     def set_mode(self, mode_name: str):
-        """Set flight mode by name (e.g. 'GUIDED', 'LOITER', 'STABILIZE')."""
+        # switch flight mode on the pixhawk
         mode_id = self._conn.mode_mapping().get(mode_name.upper())
         if mode_id is None:
             log.error(f"Unknown mode: {mode_name}")
@@ -274,18 +224,13 @@ class MAVLinkBridge:
 
     def send_statustext(self, text: str,
                         severity: int = mavutil.mavlink.MAV_SEVERITY_INFO):
-        """Send a STATUSTEXT message (shows in Mission Planner HUD)."""
+        # put a message on the ground station screen
         encoded = text[:50].encode("utf-8").ljust(50, b"\x00")
         self._conn.mav.statustext_send(severity, encoded)
 
     def send_vision_position(self, pos: np.ndarray,
                               q: np.ndarray, t_us: int = 0):
-        """
-        Send VISION_POSITION_ESTIMATE to Pixhawk.
-        Allows ArduPilot EKF3 to fuse external position (e.g. VIO / our INS).
-          pos : [x, y, z] metres (NED)
-          q   : quaternion [w, x, y, z]  (unused here — send zeros)
-        """
+        # tell the pixhawk where we think we are
         if t_us == 0:
             t_us = int(time.monotonic() * 1e6)
         self._conn.mav.vision_position_estimate_send(

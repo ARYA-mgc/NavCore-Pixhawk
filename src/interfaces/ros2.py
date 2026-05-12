@@ -26,12 +26,7 @@ except ImportError:
 
 
 class INSRos2Publisher:
-    """
-    Optional ROS2 publisher for INS state telemetry.
-
-    If ROS2 is not installed, all publish calls are silent no-ops.
-    This ensures the core system never depends on ROS2.
-    """
+    # broadcast our state to the ROS2 world (if anyone's listening)
 
     def __init__(self, node_name: str = "navcore_ins",
                  odom_topic: str = "/ins/odom",
@@ -70,13 +65,7 @@ class INSRos2Publisher:
             self._active = False
 
     def publish_odom(self, state: dict, covariance: np.ndarray):
-        """
-        Publish an Odometry message from the ESKF state.
-
-        Args:
-            state: ESKF state dict with 'pos', 'vel', 'quat' keys.
-            covariance: 15x15 error-state covariance matrix.
-        """
+        # package up our state as a ROS odometry msg
         if not self._active:
             return
 
@@ -118,7 +107,7 @@ class INSRos2Publisher:
 
     def publish_imu(self, accel: np.ndarray, gyro: np.ndarray,
                     quat: np.ndarray):
-        """Publish raw IMU data as sensor_msgs/Imu."""
+        # forward raw IMU to any ROS node that wants it
         if not self._active:
             return
 
@@ -140,7 +129,7 @@ class INSRos2Publisher:
         self._imu_pub.publish(msg)
 
     def publish_health(self, health_json: str):
-        """Publish health status as a JSON string."""
+        # broadcast our health as a string
         if not self._active:
             return
 
@@ -149,7 +138,7 @@ class INSRos2Publisher:
         self._health_pub.publish(msg)
 
     def shutdown(self):
-        """Clean shutdown of the ROS2 node."""
+        # shut down gracefully, don't just yank the cable
         if self._active and self._node:
             self._node.destroy_node()
             log.info("ROS2 node destroyed")

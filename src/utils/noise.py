@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""
-imu_noise_params.py
-===================
-Sensor noise configuration for Pixhawk Cube Orange.
-Port of imu_noise_params.m
-
-Sensors on Cube Orange:
-  Primary IMU  : ICM-42688-P  (accel + gyro)
-  Secondary IMU: ICM-20649    (accel + gyro, vibration-damped)
-  Barometer    : MS5611-01BA03
-  Magnetometer : RM3100  (external, typical)
-
-All values from datasheets + ArduPilot calibration typical values.
-Tune these in config/noise_params.yaml for your specific unit.
-"""
+# sensor noise numbers — how noisy is your hardware?
 
 import yaml
 import os
@@ -28,11 +14,7 @@ _DEFAULT_CONFIG = os.path.join(
 
 
 class IMUNoiseParams:
-    """
-    Holds noise standard deviations for all sensors.
-    Can be loaded from YAML or used with hardcoded defaults.
-    Validates all parameters against physical bounds.
-    """
+    # all the noise specs for accel, gyro, baro, mag
 
     # Physical bounds for validation
     _BOUNDS = {
@@ -111,7 +93,7 @@ class IMUNoiseParams:
             log.warning(f"Could not parse {path}: {e} — using defaults")
 
     def _validate(self):
-        """Validate all parameters against physical bounds."""
+        # sanity check — is your noise even physically possible?
         errors = []
         for param, (lo, hi) in self._BOUNDS.items():
             val = getattr(self, param, None)

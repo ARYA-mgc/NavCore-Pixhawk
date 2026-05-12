@@ -26,9 +26,7 @@ class EKFHealth(Enum):
 
 
 class ESKF:
-    """
-    Error-State Kalman Filter with quaternion attitude.
-    """
+    # the big brain — 16 states of pure guesswork
 
     # Safety bounds
     VEL_WARN = 30.0       # m/s
@@ -114,12 +112,7 @@ class ESKF:
 
     def initialize_from_sensors(self, accel_samples: np.ndarray,
                                 mag_samples: np.ndarray) -> bool:
-        """
-        Initialize attitude from stationary IMU + mag data.
-        accel_samples: (N, 3) in body frame
-        mag_samples: (N, 3) in body frame (Gauss)
-        Returns False if samples are too noisy (drone moving).
-        """
+        # Initialize attitude from stationary IMU + mag data.
         if len(accel_samples) < 10 or len(mag_samples) < 10:
             log.warning("Not enough samples for initialization")
             return False
@@ -162,10 +155,7 @@ class ESKF:
     # ── Predict ────────────────────────────────────────────────
 
     def predict(self, accel_raw: np.ndarray, gyro_raw: np.ndarray, dt: float):
-        """
-        Propagate nominal state using bias-compensated IMU.
-        Quaternion integration via first-order multiplication.
-        """
+        # predict where we are using raw sensor data and math
         if dt <= 0:
             return
 
@@ -221,9 +211,7 @@ class ESKF:
         self._check_health()
 
     def _compute_F(self, accel, gyro, R, dt) -> np.ndarray:
-        """
-        Error-state transition Jacobian (15x15).
-        """
+        # the scary 15x15 matrix that ties everything together
         F = np.eye(15)
 
         # dp/dv
@@ -252,10 +240,7 @@ class ESKF:
     # ── Measurement Updates ────────────────────────────────────
 
     def update_baro(self, alt_measured: float):
-        """
-        Barometric altitude update with innovation gating.
-        Rejects altitude jumps > 5m between consecutive samples.
-        """
+        # baro tells us how high we are, if we believe it
         z = np.array([alt_measured])
         z_pred = np.array([self.x[2]])
         y = z - z_pred  # innovation
@@ -284,12 +269,7 @@ class ESKF:
 
     def update_mag(self, yaw_measured: float, mag_norm: float = -1.0,
                    t_now: float = 0.0):
-        """
-        Magnetometer yaw update with 3-tier rejection:
-          1. Field norm check: skip if |norm - calibrated| > 30%
-          2. Time-based rejection: skip if recently EMI-contaminated
-          3. Multi-sample re-enable: require N good samples before fusion
-        """
+        # Magnetometer yaw update with 3-tier rejection:
         # Tier 1: field norm check
         if mag_norm > 0:
             norm_ratio = abs(mag_norm / self._calibrated_mag_norm - 1.0)
@@ -340,10 +320,7 @@ class ESKF:
 
     def update_optical_flow(self, flow_vx: float, flow_vy: float,
                             distance: float, quality: int):
-        """
-        Optical flow velocity update.
-        Requires valid rangefinder distance. No distance = no fusion.
-        """
+        # Optical flow velocity update.
         if distance <= 0.05 or quality < 10:
             return
 
@@ -375,21 +352,7 @@ class ESKF:
     def update_external(self, z: np.ndarray, z_pred: np.ndarray,
                         H: np.ndarray, R: np.ndarray,
                         source: str = "external") -> bool:
-        """
-        Generic external measurement update for VIO, UWB, SLAM, etc.
-
-        Uses Joseph-form covariance update with innovation gating.
-
-        Args:
-            z: (m,) measurement vector.
-            z_pred: (m,) predicted measurement from current state.
-            H: (m, 15) observation matrix for the error state.
-            R: (m, m) measurement noise covariance.
-            source: Label for logging.
-
-        Returns:
-            True if the update was accepted, False if gated out.
-        """
+        # Generic external measurement update for VIO, UWB, SLAM, etc.
         if not self._initialized:
             return False
 
@@ -435,7 +398,7 @@ class ESKF:
     # ── Error Injection ────────────────────────────────────────
 
     def _inject_error(self, dx: np.ndarray):
-        """Inject 15-element error state into nominal state."""
+        # shove the correction into the main state
         self.x[0:3] += dx[0:3]   # position
         self.x[3:6] += dx[3:6]   # velocity
 
@@ -458,10 +421,7 @@ class ESKF:
     # ── Health Monitoring ──────────────────────────────────────
 
     def _harden_covariance(self):
-        """
-        Force symmetry and bound eigenvalues to ensure positive-definiteness.
-        Must be called after updates/predict to prevent numerical divergence.
-        """
+        # keep the covariance matrix from going crazy
         # Enforce symmetry
         self.P = (self.P + self.P.T) / 2.0
 
@@ -546,7 +506,7 @@ class ESKF:
 
     @staticmethod
     def _quat_mult(q1, q2):
-        """Hamilton product: q1 * q2."""
+        # multiply two quaternions together
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
         return np.array([
@@ -558,7 +518,7 @@ class ESKF:
 
     @staticmethod
     def _quat_to_dcm(q):
-        """Quaternion to Direction Cosine Matrix (body -> NED)."""
+        # quat to rotation matrix
         w, x, y, z = q
         return np.array([
             [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
@@ -568,7 +528,7 @@ class ESKF:
 
     @staticmethod
     def _quat_to_euler(q):
-        """Quaternion to Euler angles [roll, pitch, yaw]."""
+        # quat to roll/pitch/yaw
         w, x, y, z = q
         # Roll
         sinr_cosp = 2.0 * (w*x + y*z)
@@ -586,7 +546,7 @@ class ESKF:
 
     @staticmethod
     def _euler_to_quat(roll, pitch, yaw):
-        """Euler angles to quaternion [w, x, y, z]."""
+        # roll/pitch/yaw to quaternion
         cr, sr = math.cos(roll/2), math.sin(roll/2)
         cp, sp = math.cos(pitch/2), math.sin(pitch/2)
         cy, sy = math.cos(yaw/2), math.sin(yaw/2)
@@ -599,7 +559,7 @@ class ESKF:
 
     @staticmethod
     def _skew(v):
-        """Skew-symmetric matrix from 3-vector."""
+        # cross-product matrix trick
         return np.array([
             [0, -v[2], v[1]],
             [v[2], 0, -v[0]],
@@ -613,5 +573,5 @@ class ESKF:
     # ── Reset ──────────────────────────────────────────────────
 
     def reset(self):
-        """Reset to initial state."""
+        # factory reset — start from scratch
         self.__init__(self.noise)

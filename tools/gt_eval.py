@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
-"""
-ground_truth_eval.py
-====================
-Evaluate INS accuracy against RTK/ground truth data.
-Handles time synchronization and NED frame alignment.
-
-Usage:
-  python tools/ground_truth_eval.py --ins logs/ins_data.csv --truth rtk_log.csv
-"""
+# Did we actually fly where we thought we did? Let's check against RTK.
+# Usage: python tools/gt_eval.py --ins logs/ins_data.csv --truth rtk_log.csv
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -24,7 +17,7 @@ except ImportError:
 
 
 def load_csv(path, pos_cols=(1,2,3), time_col=0):
-    """Load CSV with time and position columns."""
+    # slurp up the CSV data
     data = np.genfromtxt(path, delimiter=',', skip_header=1)
     t = data[:, time_col]
     pos = data[:, list(pos_cols)]
@@ -32,10 +25,7 @@ def load_csv(path, pos_cols=(1,2,3), time_col=0):
 
 
 def time_align(t_ins, pos_ins, t_truth, pos_truth):
-    """
-    Align INS and truth by nearest-neighbor time interpolation.
-    Returns matched arrays of equal length.
-    """
+    # Align INS and truth by nearest-neighbor time interpolation.
     matched_ins = []
     matched_truth = []
     matched_t = []
@@ -53,7 +43,7 @@ def time_align(t_ins, pos_ins, t_truth, pos_truth):
 
 
 def compute_metrics(pos_ins, pos_truth):
-    """Compute RMSE, APE, and per-axis errors."""
+    # how badly did we miss the target?
     err = pos_ins - pos_truth
 
     rmse_total = math.sqrt(np.mean(np.sum(err**2, axis=1)))

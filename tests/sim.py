@@ -84,7 +84,7 @@ def run_single(dt, seed):
     eskf = ESKF(noise)
     dr = DeadReckon(noise)
 
-    # Initialize ESKF with known attitude
+    # wake up the filter with known attitude
     eskf.x[6:10] = eskf._euler_to_quat(0, 0, 0)
     eskf._initialized = True
 
