@@ -238,3 +238,21 @@ class MAVLinkBridge:
             float(pos[0]), float(pos[1]), float(pos[2]),
             0.0, 0.0, 0.0,      # roll pitch yaw (optional)
         )
+
+    def send_velocity_target(self, vx: float, vy: float, vz: float):
+        # Sends velocity targets to Pixhawk (requires GUIDED mode)
+        # Type mask to use velocity only: 0b0000110111000111 (3527)
+        try:
+            self._conn.mav.set_position_target_local_ned_send(
+                0, # time_boot_ms
+                self._conn.target_system,
+                self._conn.target_component,
+                mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+                3527, # type_mask
+                0, 0, 0, # x, y, z
+                vx, vy, vz, # vx, vy, vz
+                0, 0, 0, # afx, afy, afz
+                0, 0 # yaw, yaw_rate
+            )
+        except Exception as e:
+            log.error(f"Failed to send velocity target: {e}")

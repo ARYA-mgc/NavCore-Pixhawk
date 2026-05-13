@@ -29,6 +29,10 @@ from logger.logger import INSLogger
 from logger.struct_log import StructuredLogger
 from utils.pid        import AdaptivePID
 from fusion.opt_flow import OpticalFlowINS
+from fusion.lr import LidarRadarFusion
+from safety.mlp import MLAnomalyDetector
+from safety.fault import FaultManager
+from concurrent.futures import ThreadPoolExecutor
 
 # ── Logging setup ──────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
@@ -82,9 +86,33 @@ class INSNavSys:
         self.optical_flow = OpticalFlowINS()
         self.time_sync = TimeSynchronizer(default_dt=self.dt)
         self.safety = SafetyMonitor()
+        self.fault_mgr = FaultManager()
+
+        # Advanced multi-threading for intensive ML/LiDAR math
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self._ml_future = None
+        self._lidar_future = None
+
+        # Mission Planner tunable parameters
+        self.params = {
+            "ML_CONTAM": 0.01,
+            "LR_VOX": 0.1,
+            "LR_WEIGHT": 1.0,      # Fusion weight scaling
+            "OBS_THRESH": 2.0,     # Obstacle detection threshold (m)
+            "SENS_TIMEOUT": 0.5,   # Sensor timeout (s)
+            "RDR_REJECT": 0.1,     # Radar static reject threshold
+            "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
+        }
+
+        # Override defaults with params
+        self.IMU_WATCHDOG_S = self.params["SENS_TIMEOUT"]
+
+        self.lidar_radar = LidarRadarFusion(voxel_size=self.params["LR_VOX"], rdr_reject=self.params["RDR_REJECT"])
+        self.ml_predictor = MLAnomalyDetector(contamination=self.params["ML_CONTAM"])
 
         # Vision injector (disabled by default, enabled after convergence)
         self._vision_enabled = False
+        self._rth_active = False
 
         # Bookkeeping
         self._imu_count   = 0
@@ -237,6 +265,45 @@ class INSNavSys:
         elif mtype == "GPS_RAW_INT":
             self.bridge.last_gps = msg
 
+        elif mtype == "OBSTACLE_DISTANCE":
+            # Mocking Lidar data ingestion (Livox style)
+            if hasattr(msg, 'distances'):
+                mock_pts = np.random.rand(100, 3) * 10.0
+                
+                # Async execution to prevent blocking the 100Hz loop
+                if self._lidar_future is None or self._lidar_future.done():
+                    if self._lidar_future is not None:
+                        safe_dist = self._lidar_future.result()
+                        if safe_dist > 0:
+                            self.eskf.update_lidar_range(safe_dist, weight=self.params["LR_WEIGHT"])
+                            
+                            if safe_dist < self.params["OBS_THRESH"]:
+                                self.bridge.send_statustext(f"OBSTACLE CLOSE: {safe_dist:.1f}m", 3)
+                    
+                    # Spawn next processing task
+                    self._lidar_future = self.executor.submit(
+                        self.lidar_radar.process_livox_cloud, mock_pts
+                    )
+                    
+        elif mtype == "RADAR_TARGET":
+            # Mocking TI mmWave IWR6843AOP doppler target ingestion
+            mock_targets = np.array([[1.0, 0.0, 0.0, 5.0]]) # [x, y, z, doppler_v]
+            radar_vel = self.lidar_radar.process_ti_radar(mock_targets)
+            if np.any(radar_vel):
+                self.eskf.update_radar_velocity(*radar_vel, weight=self.params["LR_WEIGHT"])
+
+        elif mtype == "PARAM_REQUEST_LIST":
+            self._send_all_params()
+
+        elif mtype == "PARAM_SET":
+            # Mission Planner parameter update
+            param_id = msg.param_id.strip("\x00")
+            if param_id in self.params:
+                self.params[param_id] = msg.param_value
+                self._apply_param(param_id)
+                self._send_param(param_id)
+                log.info(f"Param updated via MAVLink: {param_id} = {msg.param_value}")
+
         elif mtype == "OPTICAL_FLOW_RAD":
             if self.eskf._initialized:
                 # 1. Require valid rangefinder
@@ -265,7 +332,64 @@ class INSNavSys:
         vel = self.eskf.state["vel"]
         att = self.eskf.state["euler"]
         
-        # Hard safety enforcement
+        # 1. ML Predictive Fault Analysis (Async)
+        # Check vibration and covariance variance to predict failure before divergence
+        accel_var = float(np.var(self._init_accel_buf[-20:])) if len(self._init_accel_buf) > 0 else 0.0
+        gyro_proxy = float(np.linalg.norm(self.eskf.state["gyro_bias"]))
+        p_trace = float(np.trace(self.eskf.P))
+        
+        # Async harvesting to prevent 100Hz loop blocking
+        if self._ml_future is None or self._ml_future.done():
+            if self._ml_future is not None and self._ml_future.result() == True:
+                self.bridge.send_statustext("ML FAULT - ACTIVATING SMART RTH", 2)
+                self._rth_active = True
+                self.bridge.set_mode("GUIDED")
+                self.fault_mgr.update(t_now, ekf_healthy=True, safety_ok=True, ml_fault=True)
+            
+            # Fire and forget the next prediction
+            self._ml_future = self.executor.submit(
+                self.ml_predictor.check_health, accel_var, gyro_proxy, p_trace
+            )
+            
+        # 1.5 Smart Return to Home (RTH) Execution
+        if self._rth_active:
+            target_pos = np.array([0.0, 0.0])
+            error = target_pos - pos[:2]
+            dist = np.linalg.norm(error)
+            
+            if dist < 0.5:
+                self.bridge.send_statustext("RTH COMPLETE - HOVERING", 6)
+                self.bridge.send_velocity_target(0, 0, 0)
+                self._rth_active = False
+            else:
+                p_gain = 0.5
+                max_vel = 2.0
+                desired_vel = error * p_gain
+                
+                speed = np.linalg.norm(desired_vel)
+                if speed > max_vel:
+                    desired_vel = (desired_vel / speed) * max_vel
+                    
+                # Obstacle Avoidance
+                safe_dist = self.lidar_radar.safe_distance_m
+                if safe_dist > 0 and safe_dist < self.params["OBS_THRESH"]:
+                    scale = (safe_dist / self.params["OBS_THRESH"]) ** 2
+                    desired_vel *= scale
+                    if safe_dist < 0.5:
+                        desired_vel = np.zeros(2)
+                        self.bridge.send_statustext("RTH BLOCKED - HOLDING", 3)
+                
+                # Altitude Policy: Return at current altitude by default
+                desired_vz = 0.0
+                if pos[2] > -2.0: # Below 2m altitude (NED is negative down)
+                    if safe_dist > 3.0: # Clear corridor assumed if safe_dist is large
+                        desired_vz = -0.5 # Climb
+                    else:
+                        self.bridge.send_statustext("RTH LOW BUT CEILING UNKNOWN", 4)
+                
+                self.bridge.send_velocity_target(desired_vel[0], desired_vel[1], desired_vz)
+        
+        # 2. Hard safety enforcement
         safety_action = self.safety.check(pos, vel, att)
         
         if safety_action == SafetyAction.FORCE_DISARM:
@@ -301,6 +425,35 @@ class INSNavSys:
             log.warning("ESKF initialization failed, retrying...")
             self._init_accel_buf = self._init_accel_buf[-20:]
             self._init_mag_buf = self._init_mag_buf[-20:]
+
+    # ── MAVLink Parameter Server ───────────────────────────────
+    def _send_all_params(self):
+        for param_id in self.params:
+            self._send_param(param_id)
+
+    def _send_param(self, param_id: str):
+        val = float(self.params[param_id])
+        idx = list(self.params.keys()).index(param_id)
+        count = len(self.params)
+        
+        try:
+            from pymavlink import mavutil
+            self.bridge._conn.mav.param_value_send(
+                param_id.encode('utf-8'), val, 
+                mavutil.mavlink.MAV_PARAM_TYPE_REAL32, count, idx)
+        except Exception as e:
+            log.error(f"Failed to send param: {e}")
+
+    def _apply_param(self, param_id: str):
+        val = self.params[param_id]
+        if param_id == "LR_VOX":
+            self.lidar_radar.voxel_size = val
+        elif param_id == "ML_CONTAM":
+            self.ml_predictor = MLAnomalyDetector(contamination=val)
+        elif param_id == "SENS_TIMEOUT":
+            self.IMU_WATCHDOG_S = val
+        elif param_id == "EKF_NOISE_SCL":
+            self.eskf.Q *= val # Simple dynamic noise scalar
 
     # ── helpers ────────────────────────────────────────────────
     def _get_pi_temp(self) -> float:

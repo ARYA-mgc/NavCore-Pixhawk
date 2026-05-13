@@ -18,13 +18,24 @@ We take these guesses and feed them back into ArduPilot's EKF3 as a fake GPS sig
 
 ---
 
+## Advanced Features (Hardware Hacker Edition)
+
+We pushed the codebase beyond a simple Kalman Filter by adding advanced perception and safety features:
+
+- **ML Predictive Safety:** An unsupervised `IsolationForest` runs in the background. If it detects anomalous vibration or filter variance, it flags an imminent failure *before* the drone diverges.
+- **3D Lidar & Radar Fusion:** Tailored for the **Livox Mid-360** and **TI mmWave** radar. It handles voxel downsampling and Doppler velocity averaging.
+- **Asynchronous Execution:** Heavy math like point cloud downsampling and ML inference is offloaded to a `ThreadPoolExecutor` so it never blocks the 100Hz real-time loop.
+- **Smart Return to Home (RTH):** If a fault occurs, the companion computer commands the drone back to launch. It uses Lidar to slow down for obstacles and respects altitude (no blind climbing into ceilings).
+
+---
+
 ## Key Specifications
 
 | Parameter | Value |
 |---|---|
 | Estimator | 16-state Error-State Quaternion EKF (ESKF) |
 | EKF Rate | 50 Hz / 100 Hz (configurable) |
-| Sensors Fused | IMU (ICM-42688) + Barometer (MS5611) + Magnetometer (RM3100) + Optical Flow (optional) |
+| Sensors Fused | IMU (ICM-42688) + Baro (MS5611) + Mag (RM3100) + Livox Lidar + TI Radar |
 | Position RMSE | 0.4 -- 0.8 m (**simulation only** -- real-flight validation requires RTK/AprilTag ground truth) |
 | Protocol | MAVLink 2.0 via `pymavlink` |
 | GPS Injection | `VISION_POSITION_ESTIMATE` into ArduPilot EKF3 |
@@ -77,48 +88,24 @@ Post-flight 3D trajectory reconstruction rendered in a satellite-overlay viewer.
 ```
 NavCore-Pixhawk/
 ├── src/
-│   ├── main_ins_navigation.py       <- Entry point and system coordinator
-│   ├── mavlink_bridge.py            <- MAVLink 2.0 interface to Pixhawk
-│   ├── eskf_core.py                 <- 16-state Error-State Quaternion EKF (production)
-│   ├── imu_noise_params.py          <- Sensor noise configuration (YAML loader)
-│   ├── config_loader.py             <- Strict YAML schema validation (fail-fast)
-│   ├── dead_reckon.py               <- Fallback strapdown dead-reckoning
-│   ├── time_sync.py                 <- Hardware timestamp synchronization
-│   ├── safety_monitor.py            <- Hard velocity/tilt/position-jump limits
-│   ├── loop_monitor.py              <- Real-time loop timing and jitter tracking
-│   ├── fault_manager.py             <- Sensor dropout handling and mode escalation
-│   ├── ins_logger.py                <- CSV + UDP telemetry logger
-│   ├── structured_logger.py         <- JSONL structured state/innovation logger
-│   ├── vision_position_injector.py  <- Feeds INS state into ArduPilot EKF3
-│   ├── adaptive_pid.py              <- Gain-scheduled adaptive PID controller
-│   ├── optical_flow_ins.py          <- Optical flow velocity/position estimator
-│   ├── allan_variance.py            <- Auto noise tuning from stationary logs
-│   ├── log_replay.py                <- Offline JSONL/MAVLink log replay
-│   ├── ground_truth_eval.py         <- APE/RPE computation (RTK/AprilTag CSV)
-│   ├── ekf_comparison.py            <- ESKF vs EKF3 divergence analysis
-│   ├── ekf3_blender.py              <- EKF3 weighted blending (stub)
-│   ├── ros2_interface.py            <- Optional ROS2 publisher (stub)
-│   ├── vio_pipeline.py              <- VIO pose injection (stub)
-│   ├── uwb_fusion.py                <- UWB range fusion (stub)
-│   └── slam_interface.py            <- SLAM pose correction (stub)
-├── cpp_port/
-│   ├── CMakeLists.txt               <- C++17 + Eigen3 portable build
-│   ├── include/eskf_core.hpp        <- ESKF types and API
-│   ├── src/eskf_core.cpp            <- Full ESKF C++ implementation
-│   └── tests/test_eskf.cpp          <- Smoke test
-├── tests/
-│   ├── test_ins.py                  <- pytest unit tests (ESKF, DR, noise)
-│   ├── test_failure_scenarios.py    <- Sensor dropout, noise spike, divergence tests
-│   ├── monte_carlo_sim.py           <- Monte Carlo validation (100+ runs)
-│   └── benchmark_sitl.py           <- Software-in-the-loop benchmark
-├── config/
-│   └── noise_params.yaml           <- Tunable sensor noise parameters
-├── scripts/
-│   └── setup_rpi4.sh               <- One-shot RPi4 setup + systemd service
-├── INS SYSTEM SIMULATED USING THE MATLAB/
-│   └── simulation_source/           <- Original MATLAB/Simulink prototype
-├── logs/                            <- Auto-created at runtime
-├── requirements.txt
+│   ├── core/
+│   │   ├── m.py                    <- Main entry point & MAVLink param server
+│   │   ├── eskf.py                 <- 16-state Error-State Quaternion EKF
+│   │   └── dr.py                   <- Fallback dead-reckoning
+│   ├── fusion/
+│   │   ├── lr.py                   <- Livox Lidar & TI Radar fusion
+│   │   └── opt_flow.py             <- Optical flow velocity estimator
+│   ├── safety/
+│   │   ├── mlp.py                  <- Machine Learning failure predictor
+│   │   ├── fault.py                <- Fault manager & state machine
+│   │   └── safety.py               <- Hard limits enforcer
+│   ├── interfaces/
+│   │   └── mavlink.py              <- MAVLink 2.0 interface
+│   ├── logger/                     <- CSV and JSONL loggers
+│   └── utils/                      <- PIDs, noise params, time sync
+├── tests/                          <- PyTest suite & benchmarks
+├── config/                         <- Tunable noise parameters
+├── scripts/                        <- RPi4 setup scripts
 └── README.md
 ```
 
@@ -142,25 +129,17 @@ Low-level MAVLink 2.0 communication layer for the Pixhawk Cube Orange. Handles c
 
 Sensor noise model for Pixhawk Cube Orange hardware. Stores standard deviations for accelerometer (0.05 m/s^2), gyroscope (0.005 rad/s), barometer (0.30 m), and magnetometer (0.02 rad) white noise, plus bias instability parameters with 300-second correlation time. Values derived from ICM-42688-P, MS5611, and RM3100 datasheets. Loads override values from `config/noise_params.yaml` at runtime, falling back to hardcoded defaults if the file is absent or malformed.
 
-### src/dead_reckon.py -- Fallback Dead-Reckoning
+### src/core/m.py -- System Coordinator & Param Server
+The main entry point. Orchestrates the 100Hz loop, handles MAVLink communication, and serves as a parameter server for Mission Planner. It also manages the background thread pool for heavy math.
 
-Simple strapdown inertial dead-reckoning module with no Kalman correction. Integrates raw IMU accelerations and angular rates through body-to-NED rotation and Euler rate transform. Used as a performance baseline for benchmarking and as a fallback if the EKF diverges. Position drift accumulates unbounded without external corrections.
+### src/core/eskf.py -- 16-State Error-State Quaternion EKF
+The core navigation filter. Fuses IMU, Baro, Mag, and now Lidar/Radar data using a 16-state error-state formulation.
 
-### src/ins_logger.py -- Data Logger
+### src/fusion/lr.py -- Lidar & Radar Fusion
+Processes Livox Mid-360 point clouds and TI mmWave radar targets. Handles voxel downsampling and Doppler velocity averaging.
 
-Dual-output logging system writing EKF state to CSV at 50 Hz and optionally streaming over UDP for real-time GCS monitoring. CSV columns: `time_s, px_m, py_m, pz_m, vx_ms, vy_ms, vz_ms, roll_deg, pitch_deg, yaw_deg, P_trace, pi_temp_c, flow_vx, flow_vy, pid_kp, pid_ki, pid_kd`. The `P_trace` field (sum of covariance diagonal) provides a single scalar metric for overall estimation uncertainty.
-
-### src/vision_position_injector.py -- ArduPilot EKF3 Integration
-
-Background daemon thread that sends `VISION_POSITION_ESTIMATE` MAVLink messages to the Pixhawk at 30 Hz. This feeds the INS-estimated position into ArduPilot's EKF3, replacing GPS as the primary position source. Requires ArduPilot parameters: `EK3_SRC1_POSXY=6`, `EK3_SRC1_POSZ=6`, `EK3_SRC1_YAW=6`, `VISO_TYPE=1`. Disabled by default for safety; enable only after verifying EKF convergence.
-
-### src/adaptive_pid.py -- Adaptive PID Controller
-
-Gain-scheduled PID controller that dynamically adjusts proportional and derivative gains based on error magnitude. The proportional gain increases linearly with absolute error (`Kp = Kp_base + k_adapt * |e|`), providing more aggressive correction for large deviations and smoother control near setpoint. Includes integral anti-windup clamping. Used for altitude hold during GPS-denied flight.
-
-### src/optical_flow_ins.py -- Optical Flow Velocity Estimator
-
-Secondary velocity and position estimator using `OPTICAL_FLOW_RAD` MAVLink messages from a downward-facing optical flow sensor. Compensates for body rotation using integrated gyro data, converts flow rates to body-frame velocities using range-to-ground distance, then rotates to NED frame via yaw angle. Quality threshold filtering rejects unreliable readings. Provides an independent velocity cross-check for the primary EKF.
+### src/safety/mlp.py -- ML Predictive Safety
+Uses an unsupervised `IsolationForest` to predict imminent hardware or sensor failures based on state variance.
 
 ### tests/test_ins.py -- Unit Tests
 

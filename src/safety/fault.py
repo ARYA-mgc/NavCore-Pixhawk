@@ -15,6 +15,7 @@ class FlightMode(Enum):
     NOMINAL    = auto()   # All sensors healthy, full ESKF
     DEGRADED   = auto()   # Some sensors missing, reduced accuracy
     FAILSAFE   = auto()   # Critical sensor loss, dead-reckoning only
+    PREDICTIVE_FAIL = auto() # ML predicts imminent hardware/sensor failure
     EMERGENCY  = auto()   # Estimator diverged, request land/disarm
 
 
@@ -110,7 +111,7 @@ class FaultManager:
             sh.mark_active(t)
 
     def update(self, t_now: float, ekf_healthy: bool,
-               safety_ok: bool) -> FlightMode:
+               safety_ok: bool, ml_fault: bool = False) -> FlightMode:
         # Evaluate system health and determine operating mode.
         # Check sensor staleness
         for sh in self.sensors.values():
@@ -133,7 +134,7 @@ class FaultManager:
 
         # Determine target mode
         target_mode = self._evaluate_mode(
-            imu_ok, baro_ok, mag_ok, ekf_healthy, safety_ok
+            imu_ok, baro_ok, mag_ok, ekf_healthy, safety_ok, ml_fault
         )
 
         # Apply mode transitions with hysteresis
@@ -152,7 +153,7 @@ class FaultManager:
         return self._mode
 
     def _evaluate_mode(self, imu_ok: bool, baro_ok: bool, mag_ok: bool,
-                       ekf_healthy: bool, safety_ok: bool) -> FlightMode:
+                       ekf_healthy: bool, safety_ok: bool, ml_fault: bool) -> FlightMode:
         # the decision tree — what mode should we be in?
         # EMERGENCY: no IMU or estimator diverged
         if not imu_ok:
@@ -164,6 +165,10 @@ class FaultManager:
         # FAILSAFE: IMU only, no aiding sensors
         if not baro_ok and not mag_ok:
             return FlightMode.FAILSAFE
+
+        # PREDICTIVE_FAIL: The ML brain says we're about to crash
+        if ml_fault:
+            return FlightMode.PREDICTIVE_FAIL
 
         # DEGRADED: missing one aiding sensor
         if not baro_ok or not mag_ok or not ekf_healthy:
@@ -185,6 +190,7 @@ class FaultManager:
             FlightMode.NOMINAL:   "INFO",
             FlightMode.DEGRADED:  "WARNING",
             FlightMode.FAILSAFE:  "ERROR",
+            FlightMode.PREDICTIVE_FAIL: "CRITICAL",
             FlightMode.EMERGENCY: "CRITICAL",
         }
 

@@ -349,6 +349,35 @@ class ESKF:
         I_KH = np.eye(15) - K @ H_flow
         self.P = I_KH @ self.P @ I_KH.T + K @ R_flow @ K.T
 
+    def update_radar_velocity(self, vx: float, vy: float, vz: float, weight: float = 1.0):
+        # TI mmWave doppler velocity update. Much cleaner than optical flow.
+        H_radar = np.zeros((3, 15))
+        H_radar[0, 3] = 1.0  # vx
+        H_radar[1, 4] = 1.0  # vy
+        H_radar[2, 5] = 1.0  # vz
+
+        R_radar = np.eye(3) * (0.1 ** 2) / weight  # High confidence scaled by weight
+
+        z = np.array([vx, vy, vz])
+        z_pred = self.x[3:6]
+        
+        self.update_external(z, z_pred, H_radar, R_radar, source="radar")
+
+    def update_lidar_range(self, distance: float, weight: float = 1.0):
+        # Livox downsampled 3D range. Locks altitude solid.
+        if distance < 0.1:
+            return
+            
+        H_lidar = np.zeros((1, 15))
+        H_lidar[0, 2] = 1.0  # z pos
+        
+        R_lidar = np.array([[0.05 ** 2]]) / weight # Very high confidence scaled by weight
+
+        z = np.array([-distance]) # NED is negative down
+        z_pred = np.array([self.x[2]])
+        
+        self.update_external(z, z_pred, H_lidar, R_lidar, source="lidar")
+
     def update_external(self, z: np.ndarray, z_pred: np.ndarray,
                         H: np.ndarray, R: np.ndarray,
                         source: str = "external") -> bool:
