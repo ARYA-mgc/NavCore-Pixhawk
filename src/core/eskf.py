@@ -37,6 +37,7 @@ class ESKF:
     GYRO_BIAS_LIMIT = 0.1    # rad/s
     P_TRACE_LIMIT = 1e6
     P_COND_LIMIT = 1e12
+    Z_COV_CONVERGED = 0.25   # z-axis covariance threshold for convergence (m²)
     SYMMETRY_INTERVAL = 50   # enforce symmetry every N steps
 
     # Mag rejection thresholds
@@ -52,6 +53,7 @@ class ESKF:
         self._calibrated_mag_norm = 0.5  # Gauss, updated during init
         self._mag_consecutive_good = 0
         self._mag_required_good = 10
+        self._gps_origin = None  # set on first valid GPS fix
         self._innovation_stats = {"baro": [], "mag": []}
 
         # --- Nominal state (16) ---
@@ -525,8 +527,11 @@ class ESKF:
                 self._health = EKFHealth.FAULT
                 return
 
-        # Convergence logic based on time (step count)
-        if self._step_count > 200:
+        # Convergence logic: z-axis covariance (baro-observable) must settle
+        # AND minimum step count to avoid premature convergence.
+        # X/Y covariance grows unbounded without GPS/VIO, so only check Z.
+        z_cov = self.P[2, 2]
+        if z_cov < self.Z_COV_CONVERGED and self._step_count > 200:
             self._health = EKFHealth.HEALTHY
         else:
             self._health = EKFHealth.CONVERGING
@@ -598,6 +603,62 @@ class ESKF:
     @staticmethod
     def _wrap_angle(a: float) -> float:
         return math.atan2(math.sin(a), math.cos(a))
+
+    # ── GPS Fusion ──────────────────────────────────────────────
+
+    def update_gps(self, lat: float, lon: float, alt: float,
+                   hdop: float = 1.0,
+                   origin_lat: float = None, origin_lon: float = None,
+                   origin_alt: float = None):
+        """GPS position update with WGS-84 → local NED conversion.
+
+        Args:
+            lat, lon: degrees
+            alt: meters MSL
+            hdop: horizontal dilution of precision (lower = better)
+            origin_*: reference point for NED frame (set on first call)
+        """
+        if not self._initialized:
+            return
+        if hdop > 5.0:
+            log.debug(f"GPS rejected: HDOP={hdop:.1f} > 5.0")
+            return
+
+        # Set origin on first valid fix
+        if self._gps_origin is None:
+            self._gps_origin = {
+                "lat": origin_lat if origin_lat is not None else lat,
+                "lon": origin_lon if origin_lon is not None else lon,
+                "alt": origin_alt if origin_alt is not None else alt,
+            }
+            log.info(f"GPS origin set: lat={self._gps_origin['lat']:.7f} "
+                     f"lon={self._gps_origin['lon']:.7f} "
+                     f"alt={self._gps_origin['alt']:.1f}m")
+
+        # WGS-84 → local NED
+        d_lat = math.radians(lat - self._gps_origin["lat"])
+        d_lon = math.radians(lon - self._gps_origin["lon"])
+        R_earth = 6371000.0
+        lat_ref_rad = math.radians(self._gps_origin["lat"])
+        north = d_lat * R_earth
+        east = d_lon * R_earth * math.cos(lat_ref_rad)
+        down = -(alt - self._gps_origin["alt"])
+
+        z = np.array([north, east, down])
+        z_pred = self.x[0:3]
+
+        H_gps = np.zeros((3, 15))
+        H_gps[0, 0] = 1.0  # north
+        H_gps[1, 1] = 1.0  # east
+        H_gps[2, 2] = 1.0  # down
+
+        # HDOP-scaled noise (higher HDOP = less trust)
+        gps_pos_std = 2.5 * hdop  # ~2.5m CEP at HDOP=1
+        R_gps = np.eye(3) * (gps_pos_std ** 2)
+        # Vertical is always worse than horizontal
+        R_gps[2, 2] *= 4.0
+
+        self.update_external(z, z_pred, H_gps, R_gps, source="GPS")
 
     # ── Reset ──────────────────────────────────────────────────
 

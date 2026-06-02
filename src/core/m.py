@@ -15,6 +15,7 @@ import logging
 import argparse
 import threading
 import numpy as np
+import math
 import os
 import traceback
 
@@ -30,6 +31,7 @@ from logger.struct_log import StructuredLogger
 from utils.pid        import AdaptivePID
 from fusion.opt_flow import OpticalFlowINS
 from fusion.lr import LidarRadarFusion
+from fusion.vio import VIOPipeline
 from safety.mlp import MLAnomalyDetector
 from safety.fault import FaultManager
 from concurrent.futures import ThreadPoolExecutor
@@ -84,6 +86,7 @@ class INSNavSys:
         self.bridge = MAVLinkBridge(connection_string, baud)
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
+        self.vio = VIOPipeline(enable=False)  # enable when T265/ORB-SLAM3 connected
         self.time_sync = TimeSynchronizer(default_dt=self.dt)
         self.safety = SafetyMonitor()
         self.fault_mgr = FaultManager()
@@ -102,6 +105,8 @@ class INSNavSys:
             "SENS_TIMEOUT": 0.5,   # Sensor timeout (s)
             "RDR_REJECT": 0.1,     # Radar static reject threshold
             "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
+            "RTH_MIN_ALT": 5.0,    # Minimum RTH altitude (m AGL)
+            "RTH_CEIL_MARGIN": 2.0, # Minimum ceiling clearance required (m)
         }
 
         # Override defaults with params
@@ -118,6 +123,8 @@ class INSNavSys:
         self._imu_count   = 0
         self._baro_count  = 0
         self._mag_count   = 0
+        self._gps_count   = 0
+        self._vio_count   = 0
         self._last_print  = 0.0
         self._last_log    = 0.0
         self._last_stats  = 0.0
@@ -264,31 +271,74 @@ class INSNavSys:
 
         elif mtype == "GPS_RAW_INT":
             self.bridge.last_gps = msg
+            # Fuse GPS into ESKF when fix is 3D (fix_type >= 3)
+            if (self.eskf._initialized and
+                    hasattr(msg, 'fix_type') and msg.fix_type >= 3):
+                lat = msg.lat / 1e7  # degE7 → degrees
+                lon = msg.lon / 1e7
+                alt = msg.alt / 1000.0  # mm → m
+                hdop = msg.eph / 100.0 if hasattr(msg, 'eph') else 2.0
+                self.eskf.update_gps(lat, lon, alt, hdop=hdop)
+                self._gps_count += 1
 
         elif mtype == "OBSTACLE_DISTANCE":
-            # Mocking Lidar data ingestion (Livox style)
+            # Lidar data ingestion
+            # TODO: Replace with real Livox Mid-360 ROS2 topic subscriber
+            #       or serial parser. OBSTACLE_DISTANCE only has 1D ranges;
+            #       for full 3D point cloud, use a ROS PointCloud2 subscriber.
             if hasattr(msg, 'distances'):
-                mock_pts = np.random.rand(100, 3) * 10.0
-                
+                # Extract valid distances from OBSTACLE_DISTANCE message
+                # msg.distances is a 72-element array of distances in cm (0 = invalid)
+                distances_cm = np.array(msg.distances, dtype=float)
+                valid_mask = (distances_cm > 0) & (distances_cm < 65535)
+                if not np.any(valid_mask):
+                    return
+                valid_dists = distances_cm[valid_mask] / 100.0  # cm → m
+                n_pts = len(valid_dists)
+                # Build pseudo-3D points from angular sectors
+                angle_offset = getattr(msg, 'angle_offset', 0.0)
+                increment = getattr(msg, 'increment', 5.0)  # degrees per bin
+                indices = np.where(valid_mask)[0]
+                angles_rad = np.radians(angle_offset + indices * increment)
+                pts = np.column_stack([
+                    valid_dists * np.cos(angles_rad),
+                    valid_dists * np.sin(angles_rad),
+                    np.zeros(n_pts),
+                ])
+
                 # Async execution to prevent blocking the 100Hz loop
                 if self._lidar_future is None or self._lidar_future.done():
                     if self._lidar_future is not None:
                         safe_dist = self._lidar_future.result()
                         if safe_dist > 0:
                             self.eskf.update_lidar_range(safe_dist, weight=self.params["LR_WEIGHT"])
-                            
+
                             if safe_dist < self.params["OBS_THRESH"]:
                                 self.bridge.send_statustext(f"OBSTACLE CLOSE: {safe_dist:.1f}m", 3)
-                    
+
                     # Spawn next processing task
                     self._lidar_future = self.executor.submit(
-                        self.lidar_radar.process_livox_cloud, mock_pts
+                        self.lidar_radar.process_livox_cloud, pts
                     )
-                    
+
         elif mtype == "RADAR_TARGET":
-            # Mocking TI mmWave IWR6843AOP doppler target ingestion
-            mock_targets = np.array([[1.0, 0.0, 0.0, 5.0]]) # [x, y, z, doppler_v]
-            radar_vel = self.lidar_radar.process_ti_radar(mock_targets)
+            # TI mmWave IWR6843AOP doppler target ingestion
+            # TODO: Replace with real TI radar serial parser (UART at 921600).
+            #       RADAR_TARGET is not a standard MAVLink msg — when using a
+            #       custom parser, construct targets as [[x, y, z, doppler_v], ...]
+            if not hasattr(msg, 'distance') or not hasattr(msg, 'velocity'):
+                return
+            # Build target array from MAVLink radar-like fields
+            angle_rad = math.radians(getattr(msg, 'angle', 0.0))
+            dist = float(msg.distance)
+            vel = float(msg.velocity)
+            target = np.array([[
+                dist * math.cos(angle_rad),
+                dist * math.sin(angle_rad),
+                0.0,
+                vel,
+            ]])
+            radar_vel = self.lidar_radar.process_ti_radar(target)
             if np.any(radar_vel):
                 self.eskf.update_radar_velocity(*radar_vel, weight=self.params["LR_WEIGHT"])
 
@@ -319,13 +369,37 @@ class INSNavSys:
                 flow_vx = (msg.integrated_x - msg.integrated_xgyro)
                 flow_vy = (msg.integrated_y - msg.integrated_ygyro)
                 dt_flow = msg.integration_time_us / 1e6
-                
+
                 if dt_flow > 0:
-                    # 3. Height scaling (flow_rad * height / dt)
-                    vx = flow_vx * msg.distance / dt_flow
-                    vy = flow_vy * msg.distance / dt_flow
+                    # 3. Height scaling: angular_rate (rad/s) × height (m) = velocity (m/s)
+                    vx = (flow_vx / dt_flow) * msg.distance
+                    vy = (flow_vy / dt_flow) * msg.distance
                     self.eskf.update_optical_flow(
                         vx, vy, msg.distance, msg.quality)
+
+        elif mtype == "VISION_POSITION_ESTIMATE":
+            # VIO fusion (T265 / ORB-SLAM3)
+            if self.vio.is_active:
+                pos_vio = np.array([msg.x, msg.y, msg.z])
+                # T265 provides quaternion; fallback to identity if unavailable
+                quat_vio = np.array([1.0, 0.0, 0.0, 0.0])
+                if hasattr(msg, 'q') and msg.q is not None:
+                    quat_vio = np.array(msg.q)
+                confidence = 0.8  # TODO: parse tracking confidence from T265 via STATUSTEXT
+                result = self.vio.process_vio_update(
+                    t_now, pos_vio, quat_vio, confidence)
+                if result is not None:
+                    self.eskf.update_external(
+                        result["pos_ned"],
+                        self.eskf.state["pos"],
+                        result["H_pos"], result["R_pos"],
+                        source="VIO_pos")
+                    self.eskf.update_external(
+                        np.array([result["yaw_ned"]]),
+                        np.array([self.eskf.state["euler"][2]]),
+                        result["H_yaw"], result["R_yaw"],
+                        source="VIO_yaw")
+                    self._vio_count += 1
 
         # ── Safety & Health ─────────────────────────────────────────
         pos = self.eskf.state["pos"]
@@ -379,29 +453,52 @@ class INSNavSys:
                         desired_vel = np.zeros(2)
                         self.bridge.send_statustext("RTH BLOCKED - HOLDING", 3)
                 
-                # Altitude Policy: Return at current altitude by default
+                # Altitude Policy: climb to RTH_MIN_ALT if below, with ceiling check
                 desired_vz = 0.0
-                if pos[2] > -2.0: # Below 2m altitude (NED is negative down)
-                    if safe_dist > 3.0: # Clear corridor assumed if safe_dist is large
-                        desired_vz = -0.5 # Climb
+                current_alt_agl = -pos[2]  # NED → AGL
+                rth_min_alt = self.params["RTH_MIN_ALT"]
+                ceil_margin = self.params["RTH_CEIL_MARGIN"]
+
+                if current_alt_agl < rth_min_alt:
+                    # Check vertical clearance via lidar before climbing
+                    lidar_range = self.lidar_radar.safe_distance_m
+                    if lidar_range > 0 and lidar_range < ceil_margin:
+                        # Ceiling too close — hold altitude, do NOT climb
+                        desired_vz = 0.0
+                        self.bridge.send_statustext(
+                            f"RTH CEIL BLOCKED: {lidar_range:.1f}m", 3)
+                    elif lidar_range <= 0:
+                        # No lidar data — refuse to climb blindly
+                        desired_vz = 0.0
+                        self.bridge.send_statustext(
+                            "RTH NO LIDAR - HOLD ALT", 4)
                     else:
-                        self.bridge.send_statustext("RTH LOW BUT CEILING UNKNOWN", 4)
-                
+                        # Clear to climb
+                        desired_vz = -0.5  # climb in NED
+
                 self.bridge.send_velocity_target(desired_vel[0], desired_vel[1], desired_vz)
         
         # 2. Hard safety enforcement
         safety_action = self.safety.check(pos, vel, att)
-        
+
         if safety_action == SafetyAction.FORCE_DISARM:
             # Tell Pixhawk to disarm! (MAVLink command)
             self.bridge.send_statustext("INS CRITICAL FAULT - DISARM", 2)
             # You could add actual MAV_CMD_COMPONENT_ARM_DISARM here
-            
+
         health = self.eskf.health
-        
+
+        # Initialize VIO alignment once ESKF is healthy
+        if (health == EKFHealth.HEALTHY and
+                self.vio._enabled and not self.vio._initialized):
+            self.vio.initialize(
+                self.eskf.state["pos"], self.eskf.state["quat"],
+                np.zeros(3), np.array([1.0, 0, 0, 0]))
+            log.info("VIO pipeline aligned to ESKF frame")
+
         # Vision enabled ONLY if ESKF is healthy AND safety monitor says OK
         can_inject = (health == EKFHealth.HEALTHY and self.safety.is_injection_safe)
-        
+
         if not can_inject and self._vision_enabled:
             self._vision_enabled = False
             log.error(f"Vision injection DISABLED! Health={health.name}, Safety={safety_action.name}")
@@ -521,6 +618,7 @@ class INSNavSys:
             f"Stats @ {elapsed:.1f}s — "
             f"IMU={self._imu_count} ({eff_hz:.0f} Hz)  "
             f"Baro={self._baro_count}  Mag={self._mag_count}  "
+            f"GPS={self._gps_count}  VIO={self._vio_count}  "
             f"Loop avg={stats['avg']:.1f}ms max={stats['max']:.1f}ms  "
             f"Overruns={stats['overruns']}"
         )
@@ -532,6 +630,8 @@ class INSNavSys:
         log.info(f"  IMU samples   : {self._imu_count}")
         log.info(f"  Baro samples  : {self._baro_count}")
         log.info(f"  Mag samples   : {self._mag_count}")
+        log.info(f"  GPS samples   : {self._gps_count}")
+        log.info(f"  VIO samples   : {self._vio_count}")
         log.info(f"  Avg IMU rate  : {self._imu_count/max(elapsed,0.001):.1f} Hz")
         stats = self.loop_monitor.get_stats()
         log.info(f"  Loop overruns : {stats['overruns']}")

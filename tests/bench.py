@@ -3,7 +3,9 @@
 # Basically a drag race for the ESKF code.
 
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.abspath(os.path.join(current_dir, "..", "src"))
+sys.path.insert(0, src_dir)
 
 import time
 import math
