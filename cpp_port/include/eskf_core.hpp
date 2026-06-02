@@ -2,14 +2,26 @@
  * @file eskf_core.hpp
  * @brief 16-state Error-State Kalman Filter (ESKF) — C++ port.
  *
- * Direct port of Python eskf_core.py to standalone C++17 + Eigen3.
+ * Full port of Python eskf.py to standalone C++17 + Eigen3.
  * No ROS2 dependency. Designed for Raspberry Pi / ARM deployment.
+ * Supports SCHED_FIFO real-time scheduling on Linux.
  *
  * Nominal state (16):
  *   x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]
  *
  * Error state (15):
  *   dx = [dp(3), dv(3), dtheta(3), dba(3), dbg(3)]
+ *
+ * Features:
+ *   - Covariance-based convergence (z_cov < 0.25 + step > 200)
+ *   - Adaptive process noise scaling
+ *   - Zero velocity update (ZUPT)
+ *   - Barometric drift compensation
+ *   - Magnetometer auto-calibration
+ *   - GPS fusion (WGS-84 → NED)
+ *   - Generic external measurement update
+ *   - Lidar range + radar velocity updates
+ *   - Optical flow velocity update
  */
 
 #pragma once
@@ -17,6 +29,8 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <array>
+#include <optional>
+#include <string>
 
 namespace navcore {
 
@@ -27,6 +41,9 @@ constexpr int ERROR_DIM = 15;
 constexpr double GRAVITY = 9.80665;
 constexpr double CHI2_1DOF = 5.991;
 constexpr double CHI2_2DOF = 9.210;
+constexpr double CHI2_3DOF = 7.815;
+constexpr double R_EARTH = 6371000.0;
+constexpr double Z_COV_CONVERGED = 0.25;
 
 // ── Type Aliases ─────────────────────────────────────────────
 
@@ -39,6 +56,10 @@ using Mat4    = Eigen::Matrix4d;
 using MatP    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
 using MatQ    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
 using MatF    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
+
+// Dynamic-size types for generic updates
+using VecXd   = Eigen::VectorXd;
+using MatXd   = Eigen::MatrixXd;
 
 // ── Noise Parameters ─────────────────────────────────────────
 
@@ -62,6 +83,15 @@ enum class EKFHealth {
     HEALTHY    = 1,
     WARNING    = 2,
     FAULT      = 3,
+};
+
+// ── GPS Origin ───────────────────────────────────────────────
+
+struct GPSOrigin {
+    double lat = 0.0;
+    double lon = 0.0;
+    double alt = 0.0;
+    bool is_set = false;
 };
 
 // ── State Output ─────────────────────────────────────────────
@@ -90,47 +120,54 @@ public:
 
     // ── Core Operations ─────────────────────────────────────
 
-    /**
-     * @brief IMU prediction step.
-     * @param accel Raw accelerometer reading (m/s², body frame).
-     * @param gyro  Raw gyroscope reading (rad/s, body frame).
-     * @param dt    Time step (seconds).
-     */
     void predict(const Vec3& accel, const Vec3& gyro, double dt);
 
-    /**
-     * @brief Barometric altitude update.
-     * @param alt_m Measured altitude (m, NED down = positive).
-     */
     void update_baro(double alt_m);
 
-    /**
-     * @brief Magnetometer yaw update.
-     * @param yaw_measured Yaw angle (rad).
-     * @param mag_norm     Measured field magnitude (Gauss), -1 to skip check.
-     * @param t_now        Current time for EMI rejection.
-     */
     void update_mag(double yaw_measured, double mag_norm = -1.0,
                     double t_now = 0.0);
 
-    /**
-     * @brief Optical flow velocity update.
-     * @param flow_vx  Flow velocity X (m/s).
-     * @param flow_vy  Flow velocity Y (m/s).
-     * @param distance Rangefinder distance (m).
-     * @param quality  Flow quality (0-255).
-     */
     void update_optical_flow(double flow_vx, double flow_vy,
                              double distance, int quality);
 
     /**
-     * @brief Initialize from stationary sensor data.
-     * @param accel_samples (N, 3) accelerometer samples.
-     * @param mag_samples   (N, 3) magnetometer samples.
-     * @return True if initialization succeeded.
+     * @brief Generic external measurement update (VIO, UWB, SLAM, etc.)
+     * @return true if measurement was accepted
      */
+    bool update_external(const VecXd& z, const VecXd& z_pred,
+                         const MatXd& H, const MatXd& R,
+                         const std::string& source = "external");
+
+    /**
+     * @brief GPS position update with WGS-84 → NED conversion.
+     */
+    void update_gps(double lat, double lon, double alt, double hdop = 1.0);
+
+    /**
+     * @brief Zero velocity update — forces v=[0,0,0].
+     */
+    void update_zupt();
+
+    /**
+     * @brief Radar Doppler velocity update.
+     */
+    void update_radar_velocity(double vx, double vy, double vz,
+                                double weight = 1.0);
+
+    /**
+     * @brief Lidar range-to-ground altitude update.
+     */
+    void update_lidar_range(double distance, double weight = 1.0);
+
+    /**
+     * @brief Scale process noise based on vibration level.
+     */
+    void scale_process_noise(double vibration_level);
+
     bool initialize_from_sensors(const Eigen::MatrixXd& accel_samples,
                                   const Eigen::MatrixXd& mag_samples);
+
+    void reset();
 
     // ── Accessors ───────────────────────────────────────────
 
@@ -138,6 +175,8 @@ public:
     EKFHealth get_health() const { return health_; }
     const MatP& get_covariance() const { return P_; }
     bool is_initialized() const { return initialized_; }
+    double get_baro_bias() const { return baro_bias_; }
+    double get_vibration_scale() const { return vibration_scale_; }
 
 private:
     // ── Internal Methods ────────────────────────────────────
@@ -145,18 +184,23 @@ private:
     void inject_error(const VecE& dx);
     void harden_covariance();
     void check_health();
+    MatF compute_F(const Vec3& accel, const Vec3& gyro,
+                   const Mat3& R, double dt) const;
 
     // Quaternion utilities
     static Vec4 quat_multiply(const Vec4& q1, const Vec4& q2);
     static Mat3 quat_to_rotation(const Vec4& q);
     static Vec3 quat_to_euler(const Vec4& q);
     static Vec4 euler_to_quat(double roll, double pitch, double yaw);
+    static Mat3 skew_symmetric(const Vec3& v);
+    static double wrap_angle(double a);
 
     // ── State ───────────────────────────────────────────────
 
     VecX x_;                    // Nominal state (16)
     MatP P_;                    // Error-state covariance (15x15)
-    MatQ Q_;                    // Process noise (15x15)
+    MatQ Q_base_;               // Base process noise (15x15)
+    MatQ Q_;                    // Active process noise (scaled)
     IMUNoiseParams noise_;
     EKFHealth health_;
     bool initialized_;
@@ -166,12 +210,32 @@ private:
     Eigen::Matrix<double, 1, ERROR_DIM> H_baro_;
     Eigen::Matrix<double, 1, ERROR_DIM> H_mag_;
 
+    // GPS origin
+    GPSOrigin gps_origin_;
+
+    // Baro drift compensation
+    double baro_bias_;
+    double baro_bias_alpha_;
+    int baro_update_count_;
+
+    // Mag auto-calibration
+    double calibrated_mag_norm_;
+    double mag_reject_until_;
+    int mag_consecutive_good_;
+
+    // Adaptive noise
+    double vibration_scale_;
+
     // Safety bounds
     static constexpr double VEL_WARN = 30.0;
     static constexpr double VEL_FAULT = 100.0;
     static constexpr double TILT_WARN_DEG = 60.0;
     static constexpr double TILT_FAULT_DEG = 80.0;
     static constexpr double P_TRACE_LIMIT = 1e6;
+    static constexpr double ACCEL_BIAS_LIMIT = 2.0;
+    static constexpr double GYRO_BIAS_LIMIT = 0.1;
+    static constexpr double MAG_NORM_TOLERANCE = 0.30;
+    static constexpr double MAG_REJECT_DURATION = 2.0;
 };
 
 } // namespace navcore

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(navcore_eskf VERSION 1.0.0 LANGUAGES CXX)
+project(navcore_eskf VERSION 2.0.0 LANGUAGES CXX)
 
 # ── C++17 Standard ───────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 17)
@@ -31,6 +31,12 @@ target_include_directories(navcore_eskf
 target_link_libraries(navcore_eskf
     PUBLIC
         Eigen3::Eigen
+        $<$<PLATFORM_ID:Linux>:pthread>
+)
+
+# Enable RT scheduling on Linux/ARM (SCHED_FIFO for hard real-time)
+target_compile_definitions(navcore_eskf PUBLIC
+    $<$<PLATFORM_ID:Linux>:ENABLE_RT_SCHEDULING>
 )
 
 # ── Test executable (optional) ──────────────────────────────
@@ -54,8 +60,10 @@ install(DIRECTORY include/
 
 # ── Platform info ────────────────────────────────────────────
 message(STATUS "")
-message(STATUS "NavCore ESKF C++ Port")
+message(STATUS "NavCore ESKF C++ Port v${PROJECT_VERSION}")
 message(STATUS "  C++ Standard : C++${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build type   : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Architecture : ${CMAKE_SYSTEM_PROCESSOR}")
+message(STATUS "  Features     : GPS, ZUPT, AdaptiveQ, BaroDrift, MagAutoCal")
+message(STATUS "  RT scheduling: $<$<PLATFORM_ID:Linux>:ENABLED>")
 message(STATUS "")

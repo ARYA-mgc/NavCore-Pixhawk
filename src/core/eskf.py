@@ -56,6 +56,14 @@ class ESKF:
         self._gps_origin = None  # set on first valid GPS fix
         self._innovation_stats = {"baro": [], "mag": []}
 
+        # Baro drift compensation (Feature 8)
+        self._baro_bias = 0.0           # slow-moving bias estimate (m)
+        self._baro_bias_alpha = 0.001   # EMA decay rate (~0.1 Hz update)
+        self._baro_update_count = 0
+
+        # Adaptive process noise (Feature 6)
+        self._vibration_scale = 1.0     # current Q scaling factor
+
         # --- Nominal state (16) ---
         self.x = np.zeros(16)
         self.x[6] = 1.0  # qw = 1 (identity quaternion)
@@ -69,15 +77,16 @@ class ESKF:
         self.P[12:15, 12:15] *= 0.001  # gyro bias
 
         # --- Process noise ---
-        self.Q = np.zeros((15, 15))
+        self.Q_base = np.zeros((15, 15))
         sa = noise.accel_std ** 2
         sg = noise.gyro_std ** 2
         sab = (2.0 * noise.accel_bias_std ** 2 / max(noise.accel_bias_tau, 1.0))
         sgb = (2.0 * noise.gyro_bias_std ** 2 / max(noise.gyro_bias_tau, 1.0))
-        np.fill_diagonal(self.Q[3:6, 3:6], sa)
-        np.fill_diagonal(self.Q[6:9, 6:9], sg)
-        np.fill_diagonal(self.Q[9:12, 9:12], sab)
-        np.fill_diagonal(self.Q[12:15, 12:15], sgb)
+        np.fill_diagonal(self.Q_base[3:6, 3:6], sa)
+        np.fill_diagonal(self.Q_base[6:9, 6:9], sg)
+        np.fill_diagonal(self.Q_base[9:12, 9:12], sab)
+        np.fill_diagonal(self.Q_base[12:15, 12:15], sgb)
+        self.Q = self.Q_base.copy()  # active Q (may be scaled)
 
         # --- Measurement noise ---
         self.R_baro = np.array([[noise.baro_std ** 2]])
@@ -242,8 +251,11 @@ class ESKF:
     # ── Measurement Updates ────────────────────────────────────
 
     def update_baro(self, alt_measured: float):
-        # baro tells us how high we are, if we believe it
-        z = np.array([alt_measured])
+        """Baro altitude update with slow drift compensation."""
+        # Apply bias compensation before fusion (Feature 8)
+        alt_corrected = alt_measured - self._baro_bias
+
+        z = np.array([alt_corrected])
         z_pred = np.array([self.x[2]])
         y = z - z_pred  # innovation
 
@@ -268,6 +280,16 @@ class ESKF:
         # Joseph form covariance update
         I_KH = np.eye(15) - K @ self.H_baro
         self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
+
+        # Slow baro bias update after initial convergence (Feature 8)
+        # Uses corrected alt vs ESKF state, clamped to ±10m
+        self._baro_update_count += 1
+        if self._baro_update_count > 1000:
+            innovation = alt_corrected - self.x[2]
+            self._baro_bias = np.clip(
+                self._baro_bias + self._baro_bias_alpha * innovation,
+                -10.0, 10.0
+            )
 
     def update_mag(self, yaw_measured: float, mag_norm: float = -1.0,
                    t_now: float = 0.0):
@@ -315,10 +337,19 @@ class ESKF:
         K = self.P @ self.H_mag.T @ np.linalg.inv(S)
         dx = (K @ y).flatten()
         self._inject_error(dx)
-        
+
         # Joseph form covariance update
         I_KH = np.eye(15) - K @ self.H_mag
         self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
+
+        # Magnetometer auto-calibration: slow EMA norm update (Feature 9)
+        # Handles soft-iron distortion changes during flight
+        if mag_norm > 0:
+            alpha_mag = 0.002  # very slow update (tau ≈ 60s at 10 Hz)
+            self._calibrated_mag_norm = (
+                (1.0 - alpha_mag) * self._calibrated_mag_norm
+                + alpha_mag * mag_norm
+            )
 
     def update_optical_flow(self, flow_vx: float, flow_vy: float,
                             distance: float, quality: int):
@@ -603,6 +634,42 @@ class ESKF:
     @staticmethod
     def _wrap_angle(a: float) -> float:
         return math.atan2(math.sin(a), math.cos(a))
+
+    # ── Adaptive Process Noise (Feature 6) ─────────────────────
+
+    def scale_process_noise(self, vibration_level: float):
+        """Scale Q based on detected vibration level.
+
+        Args:
+            vibration_level: 0.0 (calm) to 1.0+ (severe vibration).
+                Computed from accel variance in the main loop.
+        """
+        # Scale factor: 1.0 at zero vibration, up to 10.0 at extreme
+        scale = max(1.0, min(1.0 + vibration_level * 5.0, 10.0))
+        self._vibration_scale = scale
+        self.Q = self.Q_base * scale
+
+    # ── Zero Velocity Update (Feature 7) ───────────────────────
+
+    def update_zupt(self):
+        """Zero velocity update — forces v=[0,0,0] as a measurement.
+
+        Should be called when the drone is detected as stationary
+        (accel ≈ gravity-only AND gyro ≈ 0).
+        """
+        if not self._initialized:
+            return
+
+        H_zupt = np.zeros((3, 15))
+        H_zupt[0, 3] = 1.0  # vx
+        H_zupt[1, 4] = 1.0  # vy
+        H_zupt[2, 5] = 1.0  # vz
+
+        R_zupt = np.eye(3) * (0.01 ** 2)  # very high confidence in zero velocity
+        z = np.zeros(3)
+        z_pred = self.x[3:6]
+
+        self.update_external(z, z_pred, H_zupt, R_zupt, source="ZUPT")
 
     # ── GPS Fusion ──────────────────────────────────────────────
 

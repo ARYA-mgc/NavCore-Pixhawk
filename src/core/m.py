@@ -32,6 +32,8 @@ from utils.pid        import AdaptivePID
 from fusion.opt_flow import OpticalFlowINS
 from fusion.lr import LidarRadarFusion
 from fusion.vio import VIOPipeline
+from fusion.multi_imu import MultiIMUFusion
+from fusion.gps_tight import TightGPSCoupling
 from safety.mlp import MLAnomalyDetector
 from safety.fault import FaultManager
 from concurrent.futures import ThreadPoolExecutor
@@ -87,6 +89,8 @@ class INSNavSys:
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
         self.vio = VIOPipeline(enable=False)  # enable when T265/ORB-SLAM3 connected
+        self.imu_fusion = MultiIMUFusion(n_channels=3)  # Cube Orange 3-IMU fusion
+        self.gps_tight = TightGPSCoupling(enable=False)  # enable with u-blox F9P
         self.time_sync = TimeSynchronizer(default_dt=self.dt)
         self.safety = SafetyMonitor()
         self.fault_mgr = FaultManager()
@@ -125,6 +129,8 @@ class INSNavSys:
         self._mag_count   = 0
         self._gps_count   = 0
         self._vio_count   = 0
+        self._zupt_count  = 0   # consecutive stationary detections
+        self._zupt_total  = 0   # total ZUPT updates applied
         self._last_print  = 0.0
         self._last_log    = 0.0
         self._last_stats  = 0.0
@@ -221,6 +227,9 @@ class INSNavSys:
         if mtype == "RAW_IMU":
             accel, gyro = self.bridge.parse_raw_imu(msg)
 
+            # Feed into multi-IMU fusion as channel 0 (primary)
+            self.imu_fusion.update_imu(0, accel, gyro, t_now)
+
             # Use hardware-backed time synchronizer
             dt = self.time_sync.compute_dt(msg)
             self._last_imu_t = t_now
@@ -232,12 +241,37 @@ class INSNavSys:
                     self._try_initialize()
                 return
 
-            ekf.predict(accel, gyro, dt)
-            self.dr.update(accel, gyro, dt)
+            # Get fused IMU output (uses all available channels)
+            fused_accel, fused_gyro, imu_conf = self.imu_fusion.get_fused(t_now)
+
+            # Adaptive process noise scaling (Feature 6)
+            vib_level = self.imu_fusion.vibration_level
+            self.eskf.scale_process_noise(vib_level)
+
+            ekf.predict(fused_accel, fused_gyro, dt)
+            self.dr.update(fused_accel, fused_gyro, dt)
             self._imu_count += 1
 
+            # Zero Velocity Update detection (Feature 7)
+            accel_magnitude = np.linalg.norm(fused_accel)
+            gyro_magnitude = np.linalg.norm(fused_gyro)
+            is_stationary = (
+                abs(accel_magnitude - 9.80665) < 0.3 and
+                gyro_magnitude < 0.02
+            )
+
+            if is_stationary:
+                self._zupt_count += 1
+                if self._zupt_count > 20:  # 200ms of stationary → apply ZUPT
+                    self.eskf.update_zupt()
+                    self._zupt_total += 1
+            else:
+                self._zupt_count = 0
+
         elif mtype == "SCALED_IMU2":
-            pass  # secondary IMU, reserved
+            # Secondary IMU (Cube Orange ICM-20948) — feed as channel 1
+            accel2, gyro2 = self.bridge.parse_scaled_imu(msg)
+            self.imu_fusion.update_imu(1, accel2, gyro2, t_now)
 
         # ── Barometer → altitude update ────────────────────
         elif mtype in ("SCALED_PRESSURE", "SCALED_PRESSURE2"):
