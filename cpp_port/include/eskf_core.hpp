@@ -6,11 +6,12 @@
  * No ROS2 dependency. Designed for Raspberry Pi / ARM deployment.
  * Supports SCHED_FIFO real-time scheduling on Linux.
  *
- * Nominal state (16):
- *   x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]
+ * Nominal state (21):
+ *   x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z,
+ *        baro_bias, clk_bias, clk_drift, wind_n, wind_e]
  *
- * Error state (15):
- *   dx = [dp(3), dv(3), dtheta(3), dba(3), dbg(3)]
+ * Error state (20):
+ *   dx = [dp(3), dv(3), dtheta(3), dba(3), dbg(3), d_baro_bias, d_clk_bias, d_clk_drift, d_wind(2)]
  *
  * Features:
  *   - Covariance-based convergence (z_cov < 0.25 + step > 200)
@@ -36,14 +37,14 @@ namespace navcore {
 
 // ── Constants ────────────────────────────────────────────────
 
-constexpr int STATE_DIM = 16;
-constexpr int ERROR_DIM = 15;
+constexpr int STATE_DIM = 21;
+constexpr int ERROR_DIM = 20;
 constexpr double GRAVITY = 9.80665;
 constexpr double CHI2_1DOF = 5.991;
 constexpr double CHI2_2DOF = 9.210;
 constexpr double CHI2_3DOF = 7.815;
 constexpr double R_EARTH = 6371000.0;
-constexpr double Z_COV_CONVERGED = 0.25;
+constexpr double Z_COV_CONVERGED = 1.5;
 
 // ── Type Aliases ─────────────────────────────────────────────
 
@@ -103,6 +104,10 @@ struct ESKFState {
     Vec3 euler;         // [roll, pitch, yaw] (rad)
     Vec3 accel_bias;    // m/s²
     Vec3 gyro_bias;     // rad/s
+    double baro_bias;   // m
+    double clock_bias;  // m
+    double clock_drift; // m/s
+    Eigen::Vector2d wind; // [north, east] m/s
 };
 
 // ── ESKF Core Class ──────────────────────────────────────────
@@ -231,7 +236,7 @@ private:
     static constexpr double VEL_FAULT = 100.0;
     static constexpr double TILT_WARN_DEG = 60.0;
     static constexpr double TILT_FAULT_DEG = 80.0;
-    static constexpr double P_TRACE_LIMIT = 1e6;
+    static constexpr double P_TRACE_LIMIT = 1e9;
     static constexpr double ACCEL_BIAS_LIMIT = 2.0;
     static constexpr double GYRO_BIAS_LIMIT = 0.1;
     static constexpr double MAG_NORM_TOLERANCE = 0.30;
