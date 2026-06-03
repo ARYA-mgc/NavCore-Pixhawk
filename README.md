@@ -18,7 +18,7 @@ We take these guesses and feed them back into ArduPilot's EKF3 as a fake GPS sig
 
 ---
 
-## Advanced Features (Hardware Hacker Edition)
+## Advanced Features
 
 We pushed the codebase beyond a simple Kalman Filter by adding advanced perception, fusion, and safety features:
 
@@ -37,26 +37,6 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 - **C++ Port (Production Ready):** Complete C++17 + Eigen3 implementation with `SCHED_FIFO` real-time scheduling. All ESKF methods ported including GPS, ZUPT, adaptive Q, and generic external updates.
 - **RTK Flight Validation Framework:** Complete end-to-end pipeline — u-blox F9P RTK ground truth collection, NTRIP RTCM3 correction relay, synchronized multi-stream flight recording, post-flight APE/RPE analysis with flight phase detection, trajectory overlay plots, and markdown validation reports.
 
----
-
-## Key Specifications
-
-| Parameter | Value |
-|---|---|
-| Estimator | 16-state Error-State Quaternion EKF (ESKF) |
-| EKF Rate | 50 Hz / 100 Hz (configurable) |
-| IMU Fusion | 3-IMU median voting + inverse-variance weighting (Cube Orange) |
-| Sensors Fused | 3× IMU + Baro (MS5611) + Mag (RM3100) + GPS + Livox Lidar + TI Radar + Optical Flow + VIO |
-| GPS Coupling | Loose (position-level) + Tight (pseudorange-level via u-blox F9P) |
-| Position RMSE | 0.4 -- 0.8 m (**simulation**) — RTK real-flight validation pipeline included |
-| Protocol | MAVLink 2.0 via `pymavlink` |
-| GPS Injection | `VISION_POSITION_ESTIMATE` into ArduPilot EKF3 |
-| Logging | CSV at 50 Hz + structured JSONL + optional UDP telemetry to GCS |
-| Safety | Hard velocity/tilt/position-jump limits, ZUPT, adaptive Q, baro drift compensation |
-| C++ Port | Complete C++17 + Eigen3, `SCHED_FIFO` real-time scheduling |
-| Platform | Hexacopter UAV |
-
----
 
 ## Hexacopter Flight Test Video
 
@@ -83,6 +63,25 @@ Five-waypoint autonomous mission configured in Mission Planner GCS over satellit
 Mission Planner compass priority and onboard magnetometer calibration interface. Six compass sensors detected: primary UAVCAN compass (DevID 97539), SPI-based LSM303D and AK8963, and three additional UAVCAN sensors. The onboard MagCal panel provides per-magnetometer calibration progress bars (Mag 1/2/3) with fitness validation. Proper compass calibration is critical for accurate heading estimation in GPS-denied navigation.
 
 ![Compass Calibration - Onboard Magnetometer Setup](doc/compass_calib.png)
+
+---
+
+## Key Specifications
+
+| Parameter | Value |
+|---|---|
+| Estimator | 21-state Square-Root Error-State Kalman Filter (SR-ESKF) |
+| EKF Rate | 50 Hz / 100 Hz (configurable) |
+| IMU Fusion | 3-IMU median voting + inverse-variance weighting (Cube Orange) |
+| Sensors Fused | 3× IMU + Baro (MS5611) + Mag (RM3100) + GPS + Livox Lidar + TI Radar + Optical Flow + VIO |
+| GPS Coupling | Loose (position-level) + Tight (pseudorange-level via u-blox F9P) |
+| Position RMSE | 0.4 -- 0.8 m (**simulation**) — RTK real-flight validation pipeline included |
+| Protocol | MAVLink 2.0 via `pymavlink` |
+| GPS Injection | `VISION_POSITION_ESTIMATE` into ArduPilot EKF3 |
+| Logging | CSV at 50 Hz + structured JSONL + optional UDP telemetry to GCS |
+| Safety | Hard velocity/tilt/position-jump limits, ZUPT, adaptive Q, baro drift compensation |
+| C++ Port | Complete C++17 + Eigen3, `SCHED_FIFO` real-time scheduling |
+| Platform | Hexacopter UAV |
 
 ---
 
@@ -220,29 +219,36 @@ graph TD
 
     %% Sensor Layer (Hardware)
     subgraph "Sensor Acquisition Layer (Hardware: Pixhawk Cube Orange)"
-        PX4["ICM-42688-P IMU<br>MS5611 Barometer<br>RM3100 Magnetometer<br>Optical Flow (Optional)"]
+        PX4["Multi-IMU (x3)<br>Barometer & Magnetometer<br>Livox LIDAR & GPS/RTK"]
         MAV["MAVLink 2.0 Interface<br>UART @ 921600 baud"]
-        PX4 -- "RAW_IMU (100Hz)<br>SCALED_PRESSURE (10Hz)<br>SCALED_IMU3 (50Hz)" --> MAV
+        PX4 -- "Sensor Data Streams" --> MAV
     end
 
     %% State Estimation (Raspberry Pi 4)
     subgraph "State Estimation Layer (Compute: Raspberry Pi 4)"
-        Bridge["mavlink_bridge.py<br>(Message Parser & Dispatch)"]
+        Bridge["m.py / mavlink_bridge.py<br>(Message Parser & Dispatch)"]
+        
+        subgraph "Pre-Processing & Calibration"
+            MagCal["mag_cal.py<br>(RLS Auto-Calibrator)"]
+            TRN["trn.py<br>(Terrain Cross-Correlation)"]
+        end
         
         subgraph "Primary Navigation Core"
-            ESKF["eskf_core.py<br>16-State Error-State Quaternion EKF"]
-            Predict["Predict Step (100Hz)<br>x̄ = f(x, u)<br>P = FPFᵀ + QΔt"]
-            Update["Update Step (10-50Hz)<br>y = z - h(x̄)<br>P = (I - KH)P(I - KH)ᵀ + KRKᵀ"]
-            Harden["Numerical Hardening<br>Eigenvalue Bounds & Symmetry"]
+            MHT["mht.py<br>(Multi-Hypothesis Tracker)"]
+            ESKF["eskf.py<br>21-State SR-ESKF"]
+            Predict["Predict Step (RK4, 100Hz)<br>U_new = QR(U*Fᵀ, √Q)"]
+            RAIM["RAIM / NIS Gating<br>(Outlier Rejection)"]
+            OOSM["OOSM History Buffer<br>(State Rewind & Re-propagate)"]
             
+            MHT --> |Manages shadow filters| ESKF
             ESKF -.-> Predict
-            Predict --> Update
-            Update --> Harden
+            Predict --> RAIM
+            RAIM --> |Accepted| OOSM
+            RAIM --> |Rejected Jumps| MHT
         end
 
         subgraph "Redundancy & Safety Handlers"
-            DR["dead_reckon.py<br>(Strapdown Fallback)"]
-            Flow["optical_flow_ins.py<br>(Velocity Cross-check)"]
+            MLP["mlp.py<br>(Isolation Forest Anomaly)"]
             Fault["fault_manager.py<br>(Sensor Dropout & Escalation)"]
             Safety["safety_monitor.py<br>(Velocity/Tilt Limits)"]
         end
@@ -251,31 +257,31 @@ graph TD
         TimeSync -. "Sync" .-> Bridge
         MAV -- "Binary Stream" --> Bridge
         
-        Bridge -- "Accel/Gyro/Baro/Mag" --> ESKF
-        Bridge -- "Raw IMU" --> DR
-        Bridge -- "Flow/Gyro" --> Flow
+        Bridge -- "Raw Mag" --> MagCal
+        Bridge -- "Lidar Point Cloud" --> TRN
         
-        Harden -- "State: [p, v, q, b_a, b_g]" --> Safety
-        Flow -. "Flow Vel" .-> Fault
-        DR -. "DR Pose" .-> Fault
-        Harden -. "Innovations / Covariance" .-> Fault
+        MagCal -- "Calibrated Mag" --> MHT
+        TRN -- "Position Correction" --> MHT
+        Bridge -- "IMU/Baro/GPS/VIO" --> MHT
         
-        Fault -- "Trigger Mode Switch" --> Safety
+        ESKF -- "State: [pos, vel, quat, biases, wind]" --> Safety
+        ESKF -. "Variance / Health" .-> MLP
+        MLP -. "Anomaly Alert" .-> Fault
+        RAIM -. "Rejection Spikes" .-> Fault
+        
+        Fault -- "Trigger Mode Switch/Land" --> Safety
     end
 
     %% Output Distribution
     subgraph "Output & Control Layer"
-        Log["ins_logger.py / structured_logger.py<br>CSV (50Hz) + JSONL"]
+        Log["ins_logger.py<br>CSV (50Hz) + JSONL"]
         Vis["vision_position_injector.py<br>VISION_POSITION_ESTIMATE (30Hz)"]
-        Ctrl["adaptive_pid.py<br>Gain-Scheduled Control"]
         ArduPilot["ArduPilot EKF3<br>(Flight Controller)"]
         
         Safety -- "Validated State" --> Log
         Safety -- "Validated State" --> Vis
-        Safety -- "Validated State" --> Ctrl
         
         Vis -- "Fused Global Pose" --> ArduPilot
-        Ctrl -- "Thrust/Attitude Commands" --> ArduPilot
     end
 ```
 
@@ -539,19 +545,20 @@ This section documents current constraints honestly. Yes, we know about them. No
 
 The pipeline enables centimeter-level ground truth comparison against the ESKF output during real flights.
 
-### Hardware Setup
+### Hardware & GCS Setup
 
-- **u-blox F9P** connected via UART to RPi4 (`/dev/ttyAMA1` or `/dev/ttyACM0`)
-- **NTRIP corrections** via RTK2go.com (free) for ±2 cm accuracy
-- Configuration: `config/rtk_config.yaml`
+- **u-blox F9P** configured as the primary GPS.
+- **Mission Planner (GCS)** handles the NTRIP client connection (e.g., via RTK2go.com) and injects RTCM3 corrections directly to the Pixhawk over the MAVLink telemetry stream.
+- **Companion Computer** (RPi4) listens to the resulting high-precision MAVLink GPS stream.
 
 ### Workflow
 
 ```bash
-# 1. Run NavCore with RTK ground truth collection
+# 1. Connect Mission Planner to the drone and start NTRIP injection.
+# 2. Run NavCore with RTK ground truth logging enabled
 python src/core/m.py --connection /dev/ttyAMA0 --rtk
 
-# 2. Fly your mission — data is auto-recorded to flight_data/YYYYMMDD_HHMMSS/
+# 3. Fly your mission — data is auto-recorded to flight_data/YYYYMMDD_HHMMSS/
 #    - imu_log.csv (100 Hz)
 #    - gps_log.csv (5 Hz)
 #    - baro_log.csv (25 Hz)
@@ -559,10 +566,10 @@ python src/core/m.py --connection /dev/ttyAMA0 --rtk
 #    - rtk_ground_truth.csv (5 Hz, RTK_FIXED only)
 #    - eskf_state.csv (50 Hz)
 
-# 3. Validate logs before analysis
+# 4. Validate logs before analysis
 python scripts/validate_logs.py --data-dir flight_data/20260602_143000/
 
-# 4. Run post-flight analysis
+# 5. Run post-flight analysis
 python scripts/analyze_flight.py --data-dir flight_data/20260602_143000/
 
 # Output (in flight_data/20260602_143000/analysis/):

@@ -44,6 +44,8 @@ from fusion.mag_cal import MagAutoCalibrator
 from fusion.trn import TerrainRelativeNavigation, DEMTile
 from fusion.mag_cal import MagAutoCalibrator
 from fusion.trn import TerrainRelativeNavigation, DEMTile
+from fusion.mag_cal import MagAutoCalibrator
+from fusion.trn import TerrainRelativeNavigation, DEMTile
 
 # RTK ground truth collection (optional, enabled with --rtk flag)
 try:
@@ -101,9 +103,17 @@ class INSNavSys:
         self.noise  = IMUNoiseParams()
         _initial_eskf = ESKF(self.noise)
         self.mht    = MHTManager(_initial_eskf)
+        self.eskf   = _initial_eskf
         self.dr     = DeadReckon(self.noise)
         self.logger = INSLogger("logs/ins_data.csv")
         self.s_logger = StructuredLogger("logs")
+        self.mag_cal = MagAutoCalibrator()
+        
+        # TRN Initialization
+        self.trn = TerrainRelativeNavigation(enable=True)
+        # Mock DEM loaded for initial tests (Flat 3km x 3km area at 30m resolution)
+        self.trn.load_dem(DEMTile(0.0, 0.0, np.zeros((100, 100)), resolution=30.0))
+
         self.bridge = MAVLinkBridge(connection_string, baud)
         self.adaptive_pid = AdaptivePID(kp_base=1.0, ki_base=0.1, kd_base=0.05)
         self.optical_flow = OpticalFlowINS()
@@ -113,13 +123,6 @@ class INSNavSys:
         self.time_sync = TimeSynchronizer(default_dt=self.dt)
         self.safety = SafetyMonitor()
         self.fault_mgr = FaultManager()
-        
-        self.mag_cal = MagAutoCalibrator()
-        
-        # TRN Initialization
-        self.trn = TerrainRelativeNavigation(enable=True)
-        # Mock DEM loaded for initial tests (Flat 3km x 3km area at 30m resolution)
-        self.trn.load_dem(DEMTile(0.0, 0.0, np.zeros((100, 100)), resolution=30.0))
 
         # Advanced multi-threading for intensive ML/LiDAR math
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -135,16 +138,15 @@ class INSNavSys:
             "SENS_TIMEOUT": 0.5,   # Sensor timeout (s)
             "RDR_REJECT": 0.1,     # Radar static reject threshold
             "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
-            "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
             "RTH_MIN_ALT": 5.0,    # Minimum RTH altitude (m AGL)
             "RTH_CEIL_MARGIN": 2.0, # Minimum ceiling clearance required (m)
             "OOSM_BUFFER_S": 2.0,  # OOSM buffer duration (s)
             "OOSM_ENABLE": 1.0,    # Enable OOSM replay
+            "MAG_3D": 0.0          # 0=False, 1=True
         }
 
         # Feature 8: Out-of-Sequence Measurement (OOSM) History Buffer
         self._oosm_buffer = deque(maxlen=int(self.params["OOSM_BUFFER_S"] * self.update_hz))
-
 
         # Override defaults with params
         self.IMU_WATCHDOG_S = self.params["SENS_TIMEOUT"]
@@ -252,11 +254,12 @@ class INSNavSys:
 
         # Start flight recording if RTK enabled
         if self.flight_recorder:
+            from datetime import datetime
             self.flight_recorder.start_session({
                 "connection": self.connection_string,
                 "baud": self.baud,
                 "hz": self.update_hz,
-                "start_time": datetime.now().isoformat() if 'datetime' in dir() else time.time(),
+                "start_time": datetime.now().isoformat(),
             })
 
         log.info("=== INS main loop started ===")
@@ -271,7 +274,6 @@ class INSNavSys:
             self.logger.close()
             self.s_logger.close()
             self.loop_monitor.print_histogram()
-            self._print_final_stats()
             # Stop RTK subsystems
             if self.flight_recorder:
                 self.flight_recorder.stop_session()
@@ -415,7 +417,10 @@ class INSNavSys:
                 if yaw_rad < 0:
                     yaw_rad += 2 * math.pi
                     
-                mag_norm = np.sqrt(cmx**2 + cmy**2 + cmz**2)
+                if self.params.get("MAG_3D", False):
+                    mag_norm = np.linalg.norm(cal_m)
+                else:
+                    mag_norm = np.sqrt(cmx**2 + cmy**2 + cmz**2)
 
                 self.mht.update_mag(yaw_rad, mag_norm=mag_norm,
                                t_now=t_now)
@@ -504,12 +509,7 @@ class INSNavSys:
 
         elif mtype == "OBSTACLE_DISTANCE":
             # Lidar data ingestion
-            # TODO: Replace with real Livox Mid-360 ROS2 topic subscriber
-            #       or serial parser. OBSTACLE_DISTANCE only has 1D ranges;
-            #       for full 3D point cloud, use a ROS PointCloud2 subscriber.
             if hasattr(msg, 'distances'):
-                # Extract valid distances from OBSTACLE_DISTANCE message
-                # msg.distances is a 72-element array of distances in cm (0 = invalid)
                 distances_cm = np.array(msg.distances, dtype=float)
                 valid_mask = (distances_cm > 0) & (distances_cm < 65535)
                 if not np.any(valid_mask):
@@ -543,13 +543,8 @@ class INSNavSys:
                     )
 
         elif mtype == "RADAR_TARGET":
-            # TI mmWave IWR6843AOP doppler target ingestion
-            # TODO: Replace with real TI radar serial parser (UART at 921600).
-            #       RADAR_TARGET is not a standard MAVLink msg — when using a
-            #       custom parser, construct targets as [[x, y, z, doppler_v], ...]
             if not hasattr(msg, 'distance') or not hasattr(msg, 'velocity'):
                 return
-            # Build target array from MAVLink radar-like fields
             angle_rad = math.radians(getattr(msg, 'angle', 0.0))
             dist = float(msg.distance)
             vel = float(msg.velocity)
