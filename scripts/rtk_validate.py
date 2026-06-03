@@ -131,7 +131,7 @@ def run_eskf_replay(events, noise):
             gps_std = 2.5 * hdop
             R = np.eye(3) * (gps_std ** 2)
             R[2, 2] *= 4.0
-            eskf.update_external(z, z_pred, H, R, source="GPS")
+            eskf.update_external(z, z_pred, H, R, source="gps")
 
     return state_log
 
