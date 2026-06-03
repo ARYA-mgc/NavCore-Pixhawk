@@ -50,12 +50,12 @@ class MAVLinkBridge:
         self._conn = mavutil.mavlink_connection(
             self.connection_string,
             baud=self.baud,
-            source_system=255,        # GCS system id
-            source_component=0,
+            source_system=1,          # Vehicle system id
+            source_component=mavutil.mavlink.MAV_COMP_ID_ONBOARD_COMPUTER, # 191
             autoreconnect=True,
             dialect="ardupilotmega",
         )
-        log.info("MAVLink port opened")
+        log.info("MAVLink port opened (SYSID=1, COMPID=191)")
 
     def wait_heartbeat(self, timeout: float = 30.0):
         # wait for the pixhawk to say hi
@@ -211,6 +211,9 @@ class MAVLinkBridge:
 
     def set_mode(self, mode_name: str):
         # switch flight mode on the pixhawk
+        if self._conn is None or not hasattr(self._conn, "mode_mapping"):
+            log.debug(f"set_mode({mode_name}) skipped: no MAVLink link")
+            return
         mode_id = self._conn.mode_mapping().get(mode_name.upper())
         if mode_id is None:
             log.error(f"Unknown mode: {mode_name}")
@@ -256,3 +259,34 @@ class MAVLinkBridge:
             )
         except Exception as e:
             log.error(f"Failed to send velocity target: {e}")
+
+    def send_named_value_float(self, name: str, value: float):
+        # send a float to Mission Planner's status tab
+        if not self._conn:
+            return
+        # name must be 10 characters max
+        name_bytes = name[:10].encode('utf-8')
+        t_ms = int(time.monotonic() * 1000) % 4294967296
+        try:
+            self._conn.mav.named_value_float_send(
+                t_ms,
+                name_bytes,
+                float(value)
+            )
+        except Exception:
+            pass
+
+    def send_named_value_int(self, name: str, value: int):
+        # send an int to Mission Planner's status tab
+        if not self._conn:
+            return
+        name_bytes = name[:10].encode('utf-8')
+        t_ms = int(time.monotonic() * 1000) % 4294967296
+        try:
+            self._conn.mav.named_value_int_send(
+                t_ms,
+                name_bytes,
+                int(value)
+            )
+        except Exception:
+            pass
