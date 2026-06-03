@@ -35,7 +35,7 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 - **Asynchronous Execution:** Heavy math like point cloud downsampling and ML inference is offloaded to a `ThreadPoolExecutor` so it never blocks the 100Hz real-time loop.
 - **Smart Return to Home (RTH):** If a fault occurs, the companion computer commands the drone back to launch. It uses Lidar ceiling clearance checks and respects altitude (no blind climbing into ceilings).
 - **C++ Port (Production Ready):** Complete C++17 + Eigen3 implementation with `SCHED_FIFO` real-time scheduling. All ESKF methods ported including GPS, ZUPT, adaptive Q, and generic external updates.
-- **RTK Flight Validation Framework:** Simulation data generator (circle/figure-8/hover trajectories) and ESKF replay validator with RMSE, convergence time, and drift rate metrics.
+- **RTK Flight Validation Framework:** Complete end-to-end pipeline — u-blox F9P RTK ground truth collection, NTRIP RTCM3 correction relay, synchronized multi-stream flight recording, post-flight APE/RPE analysis with flight phase detection, trajectory overlay plots, and markdown validation reports.
 
 ---
 
@@ -48,7 +48,7 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 | IMU Fusion | 3-IMU median voting + inverse-variance weighting (Cube Orange) |
 | Sensors Fused | 3× IMU + Baro (MS5611) + Mag (RM3100) + GPS + Livox Lidar + TI Radar + Optical Flow + VIO |
 | GPS Coupling | Loose (position-level) + Tight (pseudorange-level via u-blox F9P) |
-| Position RMSE | 0.4 -- 0.8 m (**simulation only** -- RTK validation framework included) |
+| Position RMSE | 0.4 -- 0.8 m (**simulation**) — RTK real-flight validation pipeline included |
 | Protocol | MAVLink 2.0 via `pymavlink` |
 | GPS Injection | `VISION_POSITION_ESTIMATE` into ArduPilot EKF3 |
 | Logging | CSV at 50 Hz + structured JSONL + optional UDP telemetry to GCS |
@@ -531,7 +531,48 @@ This section documents current constraints honestly. Yes, we know about them. No
 | Medium | ArduPilot EKF3 blending (Covariance Intersection) | Done (`ekf3_blender.py`) |
 | Medium | SLAM pose fusion (Umeyama alignment) | Done (`slam_interface.py`) |
 | Medium | Generic external measurement update | Done (`eskf.py: update_external`) |
-| Future | Real-flight RTK ground truth data collection | Pending hardware test |
+| Medium | **RTK ground truth collection pipeline** | Done (`rtk_collector.py`, `ntrip_client.py`, `flight_recorder.py`, `analyze_flight.py`) |
+
+---
+
+## RTK Ground Truth Collection (Real-Flight Validation)
+
+The pipeline enables centimeter-level ground truth comparison against the ESKF output during real flights.
+
+### Hardware Setup
+
+- **u-blox F9P** connected via UART to RPi4 (`/dev/ttyAMA1` or `/dev/ttyACM0`)
+- **NTRIP corrections** via RTK2go.com (free) for ±2 cm accuracy
+- Configuration: `config/rtk_config.yaml`
+
+### Workflow
+
+```bash
+# 1. Run NavCore with RTK ground truth collection
+python src/core/m.py --connection /dev/ttyAMA0 --rtk
+
+# 2. Fly your mission — data is auto-recorded to flight_data/YYYYMMDD_HHMMSS/
+#    - imu_log.csv (100 Hz)
+#    - gps_log.csv (5 Hz)
+#    - baro_log.csv (25 Hz)
+#    - mag_log.csv (10 Hz)
+#    - rtk_ground_truth.csv (5 Hz, RTK_FIXED only)
+#    - eskf_state.csv (50 Hz)
+
+# 3. Validate logs before analysis
+python scripts/validate_logs.py --data-dir flight_data/20260602_143000/
+
+# 4. Run post-flight analysis
+python scripts/analyze_flight.py --data-dir flight_data/20260602_143000/
+
+# Output (in flight_data/20260602_143000/analysis/):
+#   - flight_report.md    — full markdown report with RMSE summary table
+#   - trajectory_2d.png   — 2D NE trajectory overlay
+#   - ape_timeseries.png  — APE vs time with convergence marker
+#   - convergence.png     — convergence time graph
+#   - phase_errors.png    — per-phase error breakdown
+#   - errors.csv          — raw error time series
+```
 
 ---
 
