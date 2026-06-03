@@ -102,12 +102,12 @@ class SLAMInterface:
         self._q_slam_to_ned = np.array([1.0, 0, 0, 0])
 
         # ESKF measurement matrices
-        self.H_pos = np.zeros((3, 15))
+        self.H_pos = np.zeros((3, 20))
         self.H_pos[0, 0] = 1.0
         self.H_pos[1, 1] = 1.0
         self.H_pos[2, 2] = 1.0
 
-        self.H_yaw = np.zeros((1, 15))
+        self.H_yaw = np.zeros((1, 20))
         self.H_yaw[0, 8] = 1.0
 
         if enable:
