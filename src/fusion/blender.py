@@ -85,6 +85,12 @@ class EKF3Blender:
                 pos_variance, pos_variance, pos_variance,
                 vel_variance, vel_variance, vel_variance,
                 att_variance, att_variance, att_variance,
+                0.0, 0.0, 0.0,  # accel bias
+                0.0, 0.0, 0.0,  # gyro bias
+                0.0,            # baro bias
+                0.0,            # clock bias
+                0.0,            # clock drift
+                0.0, 0.0        # wind
             ]),
         }
 
@@ -175,7 +181,7 @@ class EKF3Blender:
             "pos": pos_fused,
             "vel": vel_fused,
             "euler": euler_fused,
-            "P_diag": np.concatenate([P_pos, P_vel, np.zeros(6)]),
+            "P_diag": np.concatenate([P_pos, P_vel, np.zeros(14)]),
             "blend_count": self._blend_count,
         }
 
