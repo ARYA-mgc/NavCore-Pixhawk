@@ -77,12 +77,12 @@ class VIOPipeline:
         self._pos_history = deque(maxlen=self.OUTLIER_WINDOW)
 
         # Measurement matrices for ESKF (position: observe dx,dy,dz)
-        self.H_pos = np.zeros((3, 15))
+        self.H_pos = np.zeros((3, 20))
         self.H_pos[0, 0] = 1.0  # dp_x
         self.H_pos[1, 1] = 1.0  # dp_y
         self.H_pos[2, 2] = 1.0  # dp_z
 
-        self.H_yaw = np.zeros((1, 15))
+        self.H_yaw = np.zeros((1, 20))
         self.H_yaw[0, 8] = 1.0  # dtheta_z
 
         self.R_pos = np.eye(3) * (pos_std ** 2)
