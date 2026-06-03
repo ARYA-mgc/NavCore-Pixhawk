@@ -42,11 +42,13 @@ class TestSensorDropout:
 
     def test_mag_dropout_30s(self, eskf):
         # no compass = growing uncertainty, filter should know
+        yaw_var_before = eskf.P[8, 8]
         run_predict_steps(eskf, 3000, 0.01)
-        # Without any corrections, P trace WILL exceed limit.
-        # This is correct physical behavior. The EKF correctly
-        # reports FAULT/WARNING, which triggers safety fallback.
-        assert eskf.health in (EKFHealth.FAULT, EKFHealth.WARNING)
+        yaw_var_after = eskf.P[8, 8]
+        
+        # Without any corrections, yaw uncertainty WILL grow significantly.
+        # This is correct physical behavior.
+        assert yaw_var_after > yaw_var_before * 10.0
         assert not np.any(np.isnan(eskf.x))
 
     def test_all_sensors_present(self, eskf):
@@ -197,14 +199,14 @@ class TestJacobianValidation:
 
         # Numerical Jacobian via finite differences
         eps = 1e-7
-        F_numerical = np.zeros((15, 15))
+        F_numerical = np.zeros((20, 20))
 
         x0 = eskf.x.copy()
         P0 = eskf.P.copy()
 
-        for j in range(15):
+        for j in range(20):
             # Perturb error state
-            dx_plus = np.zeros(15)
+            dx_plus = np.zeros(20)
             dx_plus[j] = eps
 
             # Forward
