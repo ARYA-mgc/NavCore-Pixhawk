@@ -102,7 +102,7 @@ class UWBFusion:
         # Linearised observation matrix (1x15)
         # dz/dp = -(p_anchor - p_hat)^T / ||p_anchor - p_hat||
         unit_vec = diff / pred_range
-        H = np.zeros((1, 15))
+        H = np.zeros((1, 20))
         H[0, 0:3] = -unit_vec
 
         # Measurement noise
