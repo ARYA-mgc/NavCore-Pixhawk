@@ -21,6 +21,7 @@ import traceback
 
 from interfaces.mavlink import MAVLinkBridge
 from core.eskf        import ESKF, EKFHealth
+from core.mht         import MHTManager
 from utils.noise      import IMUNoiseParams
 from core.dr import DeadReckon
 from safety.safety import SafetyMonitor, SafetyAction
@@ -35,8 +36,23 @@ from fusion.vio import VIOPipeline
 from fusion.multi_imu import MultiIMUFusion
 from fusion.gps_tight import TightGPSCoupling
 from safety.mlp import MLAnomalyDetector
+from safety.mlp import MLAnomalyDetector
 from safety.fault import FaultManager
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from fusion.mag_cal import MagAutoCalibrator
+from fusion.trn import TerrainRelativeNavigation, DEMTile
+from fusion.mag_cal import MagAutoCalibrator
+from fusion.trn import TerrainRelativeNavigation, DEMTile
+
+# RTK ground truth collection (optional, enabled with --rtk flag)
+try:
+    from interfaces.rtk_collector import RTKCollector
+    from interfaces.ntrip_client import NTRIPClient, generate_gga
+    from logger.flight_recorder import FlightRecorder
+    HAS_RTK = True
+except ImportError:
+    HAS_RTK = False
 
 # ── Logging setup ──────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
@@ -73,15 +89,18 @@ class INSNavSys:
     IMU_WATCHDOG_S   = 0.5           # warn if no IMU for this long
     INIT_SAMPLES     = 50            # samples for sensor init
 
-    def __init__(self, connection_string: str, baud: int, update_hz: int):
+    def __init__(self, connection_string: str, baud: int, update_hz: int,
+                 rtk_enabled: bool = False):
         self.connection_string = connection_string
         self.baud              = baud
         self.update_hz         = update_hz
         self.dt                = 1.0 / update_hz
+        self._rtk_enabled      = rtk_enabled and HAS_RTK
 
         # sub-systems
         self.noise  = IMUNoiseParams()
-        self.eskf   = ESKF(self.noise)
+        _initial_eskf = ESKF(self.noise)
+        self.mht    = MHTManager(_initial_eskf)
         self.dr     = DeadReckon(self.noise)
         self.logger = INSLogger("logs/ins_data.csv")
         self.s_logger = StructuredLogger("logs")
@@ -94,6 +113,13 @@ class INSNavSys:
         self.time_sync = TimeSynchronizer(default_dt=self.dt)
         self.safety = SafetyMonitor()
         self.fault_mgr = FaultManager()
+        
+        self.mag_cal = MagAutoCalibrator()
+        
+        # TRN Initialization
+        self.trn = TerrainRelativeNavigation(enable=True)
+        # Mock DEM loaded for initial tests (Flat 3km x 3km area at 30m resolution)
+        self.trn.load_dem(DEMTile(0.0, 0.0, np.zeros((100, 100)), resolution=30.0))
 
         # Advanced multi-threading for intensive ML/LiDAR math
         self.executor = ThreadPoolExecutor(max_workers=2)
@@ -109,9 +135,16 @@ class INSNavSys:
             "SENS_TIMEOUT": 0.5,   # Sensor timeout (s)
             "RDR_REJECT": 0.1,     # Radar static reject threshold
             "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
+            "EKF_NOISE_SCL": 1.0,  # Noise scalar for tuning
             "RTH_MIN_ALT": 5.0,    # Minimum RTH altitude (m AGL)
             "RTH_CEIL_MARGIN": 2.0, # Minimum ceiling clearance required (m)
+            "OOSM_BUFFER_S": 2.0,  # OOSM buffer duration (s)
+            "OOSM_ENABLE": 1.0,    # Enable OOSM replay
         }
+
+        # Feature 8: Out-of-Sequence Measurement (OOSM) History Buffer
+        self._oosm_buffer = deque(maxlen=int(self.params["OOSM_BUFFER_S"] * self.update_hz))
+
 
         # Override defaults with params
         self.IMU_WATCHDOG_S = self.params["SENS_TIMEOUT"]
@@ -122,6 +155,14 @@ class INSNavSys:
         # Vision injector (disabled by default, enabled after convergence)
         self._vision_enabled = False
         self._rth_active = False
+
+        # ── RTK ground truth collection (optional) ──────────────
+        self.rtk_collector = None
+        self.ntrip_client = None
+        self.flight_recorder = None
+
+        if self._rtk_enabled:
+            self._init_rtk()
 
         # Bookkeeping
         self._imu_count   = 0
@@ -145,10 +186,53 @@ class INSNavSys:
         self._init_mag_buf   = []
 
         log.info("INS Navigation System initialised (ESKF)")
+        if self._rtk_enabled:
+            log.info("  RTK ground truth collection ENABLED")
         log.info(f"  Connection : {connection_string}  baud={baud}")
         log.info(f"  EKF rate   : {update_hz} Hz  (dt={self.dt*1000:.1f} ms)")
 
     # ── entry point ────────────────────────────────────────────
+    def _init_rtk(self):
+        """Initialize RTK collector, NTRIP client, and flight recorder."""
+        import yaml
+        rtk_config_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "config", "rtk_config.yaml")
+        try:
+            with open(rtk_config_path) as f:
+                rtk_cfg = yaml.safe_load(f)
+        except Exception as e:
+            log.warning(f"Could not load rtk_config.yaml: {e} — using defaults")
+            rtk_cfg = {}
+
+        # RTK Collector
+        self.rtk_collector = RTKCollector(rtk_cfg)
+        if self.rtk_collector.connect():
+            self.rtk_collector.start()
+        else:
+            log.warning("RTK F9P not connected — recording without ground truth")
+            self.rtk_collector = None
+
+        # NTRIP Client
+        ntrip_cfg = rtk_cfg.get("ntrip", {})
+        if ntrip_cfg.get("enabled", False) and self.rtk_collector:
+            self.ntrip_client = NTRIPClient(
+                ntrip_cfg,
+                serial_write_fn=self.rtk_collector.write_to_serial)
+            # Provide GGA source from RTK fixes
+            def _gga_source():
+                fix = self.rtk_collector.last_fix
+                if fix and fix.fix_type >= 3:
+                    return generate_gga(fix.lat_deg, fix.lon_deg, fix.alt_m)
+                return None
+            self.ntrip_client.set_gga_source(_gga_source)
+            self.ntrip_client.start()
+
+        # Flight Recorder
+        rec_cfg = rtk_cfg.get("recording", {})
+        self.flight_recorder = FlightRecorder(
+            output_dir=rec_cfg.get("output_dir", "flight_data"),
+            flush_interval_s=rec_cfg.get("flush_interval_s", 1.0))
+
     def run(self):
         log.info("Connecting to Pixhawk ...")
         try:
@@ -165,6 +249,16 @@ class INSNavSys:
         log.info(f"Data streams requested at {self.update_hz} Hz")
 
         self._start_time = time.monotonic()
+
+        # Start flight recording if RTK enabled
+        if self.flight_recorder:
+            self.flight_recorder.start_session({
+                "connection": self.connection_string,
+                "baud": self.baud,
+                "hz": self.update_hz,
+                "start_time": datetime.now().isoformat() if 'datetime' in dir() else time.time(),
+            })
+
         log.info("=== INS main loop started ===")
 
         try:
@@ -178,6 +272,14 @@ class INSNavSys:
             self.s_logger.close()
             self.loop_monitor.print_histogram()
             self._print_final_stats()
+            # Stop RTK subsystems
+            if self.flight_recorder:
+                self.flight_recorder.stop_session()
+            if self.ntrip_client:
+                self.ntrip_client.stop()
+            if self.rtk_collector:
+                log.info(self.rtk_collector.summary())
+                self.rtk_collector.stop()
 
     # ── main loop ──────────────────────────────────────────────
     def _main_loop(self):
@@ -246,24 +348,37 @@ class INSNavSys:
 
             # Adaptive process noise scaling (Feature 6)
             vib_level = self.imu_fusion.vibration_level
-            self.eskf.scale_process_noise(vib_level)
+            self.mht.scale_process_noise(vib_level)
 
-            ekf.predict(fused_accel, fused_gyro, dt)
+            # Pre-predict state snapshot for OOSM
+            x_prev = self.eskf.x.copy()
+            U_prev = self.eskf.U.copy()
+
+            self.mht.predict(fused_accel, fused_gyro, dt)
             self.dr.update(fused_accel, fused_gyro, dt)
             self._imu_count += 1
+            
+            # Store history for OOSM replay
+            self._oosm_buffer.append((t_now, x_prev, U_prev, fused_accel, fused_gyro, dt))
+
+            # Record IMU for flight data
+            if self.flight_recorder and self.flight_recorder.is_recording:
+                self.flight_recorder.record_imu(t_now, fused_accel, fused_gyro)
 
             # Zero Velocity Update detection (Feature 7)
             accel_magnitude = np.linalg.norm(fused_accel)
             gyro_magnitude = np.linalg.norm(fused_gyro)
+            horiz_accel = float(np.linalg.norm(fused_accel[0:2]))
             is_stationary = (
                 abs(accel_magnitude - 9.80665) < 0.3 and
-                gyro_magnitude < 0.02
+                gyro_magnitude < 0.02 and
+                horiz_accel < 0.5
             )
 
             if is_stationary:
                 self._zupt_count += 1
                 if self._zupt_count > 20:  # 200ms of stationary → apply ZUPT
-                    self.eskf.update_zupt()
+                    self.mht.update_zupt()
                     self._zupt_total += 1
             else:
                 self._zupt_count = 0
@@ -276,44 +391,116 @@ class INSNavSys:
         # ── Barometer → altitude update ────────────────────
         elif mtype in ("SCALED_PRESSURE", "SCALED_PRESSURE2"):
             alt_m = self.bridge.parse_baro(msg)
-            ekf.update_baro(alt_m)
+            self.mht.update_baro(alt_m)
             self._baro_count += 1
+            if self.flight_recorder and self.flight_recorder.is_recording:
+                self.flight_recorder.record_baro(t_now, alt_m)
 
         # ── Magnetometer → yaw update ─────────────────────
         elif mtype == "SCALED_IMU3":
-            yaw_rad = self.bridge.parse_mag_yaw(msg)
-            if yaw_rad is not None:
-                # Get mag norm for disturbance detection
-                mag_norm = -1.0
-                if hasattr(msg, 'xmag'):
-                    mx = msg.xmag * 1e-3
-                    my = msg.ymag * 1e-3
-                    mz = msg.zmag * 1e-3
-                    mag_norm = np.sqrt(mx**2 + my**2 + mz**2)
+            if hasattr(msg, 'xmag'):
+                mx = msg.xmag * 1e-3
+                my = msg.ymag * 1e-3
+                mz = msg.zmag * 1e-3
+                
+                # Update RLS Auto-Calibrator asynchronously in background
+                self.mag_cal.update(mx, my, mz)
+                
+                # Apply live calibration (will return raw until converged)
+                cal_m = self.mag_cal.apply(mx, my, mz)
+                cmx, cmy, cmz = cal_m[0], cal_m[1], cal_m[2]
+                
+                # We calculate yaw from the calibrated components
+                yaw_rad = math.atan2(cmy, cmx)
+                if yaw_rad < 0:
+                    yaw_rad += 2 * math.pi
+                    
+                mag_norm = np.sqrt(cmx**2 + cmy**2 + cmz**2)
 
-                ekf.update_mag(yaw_rad, mag_norm=mag_norm,
+                self.mht.update_mag(yaw_rad, mag_norm=mag_norm,
                                t_now=t_now)
                 self._mag_count += 1
+                if self.flight_recorder and self.flight_recorder.is_recording:
+                    self.flight_recorder.record_mag(
+                        t_now, cmx, cmy, cmz)
 
                 # Collect mag for init
-                if not self.eskf._initialized:
+                if not self.mht._initialized:
                     self._init_mag_buf.append(
-                        np.array([msg.xmag, msg.ymag, msg.zmag]) * 1e-3)
+                        np.array([cmx, cmy, cmz]))
 
         elif mtype == "ATTITUDE":
             self.bridge.last_attitude = msg
 
         elif mtype == "GPS_RAW_INT":
             self.bridge.last_gps = msg
-            # Fuse GPS into ESKF when fix is 3D (fix_type >= 3)
-            if (self.eskf._initialized and
+            # Fuse GPS into MHT when fix is 3D (fix_type >= 3)
+            if (self.mht._initialized and
                     hasattr(msg, 'fix_type') and msg.fix_type >= 3):
                 lat = msg.lat / 1e7  # degE7 → degrees
                 lon = msg.lon / 1e7
                 alt = msg.alt / 1000.0  # mm → m
                 hdop = msg.eph / 100.0 if hasattr(msg, 'eph') else 2.0
-                self.eskf.update_gps(lat, lon, alt, hdop=hdop)
+
+                latency_s = self.params.get("GPS_LATENCY_S", 0.15)  # 150ms default delay
+                t_meas = t_now - latency_s
+
+                if self.params.get("OOSM_ENABLE", 1.0) > 0.5 and len(self._oosm_buffer) > 0:
+                    # Formal OOSM Replay
+                    # 1. Find closest state in buffer prior to t_meas
+                    replay_idx = -1
+                    for i in range(len(self._oosm_buffer)-1, -1, -1):
+                        if self._oosm_buffer[i][0] <= t_meas:
+                            replay_idx = i
+                            break
+                    
+                    if replay_idx != -1:
+                        # 2. Rewind state
+                        _, x_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
+                        self.eskf.x = x_rewind.copy()
+                        self.eskf.U = U_rewind.copy()
+                        self.eskf.P = U_rewind.T @ U_rewind
+                        
+                        # 3. Apply delayed measurement
+                        self.mht.update_gps(lat, lon, alt, hdop=hdop, t_now=t_meas)
+                        
+                        # 4. Re-propagate forward to t_now
+                        for i in range(replay_idx, len(self._oosm_buffer)):
+                            _, _, _, a, g, dt_hist = self._oosm_buffer[i]
+                            # Update buffered state snapshot with corrected state
+                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
+                            self.mht.predict(a, g, dt_hist)
+                    else:
+                        # Buffer too short, fallback to no-compensation (or Taylor)
+                        self.mht.update_gps(lat, lon, alt, hdop=hdop, t_now=t_now)
+                else:
+                    # Taylor extrapolation fallback
+                    v_ned = self.eskf.x[3:6]
+                    lat_adj = lat + (v_ned[0] * latency_s) / 111320.0
+                    lon_adj = lon + (v_ned[1] * latency_s) / (111320.0 * math.cos(math.radians(lat)))
+                    alt_adj = alt - (v_ned[2] * latency_s)
+                    self.mht.update_gps(lat_adj, lon_adj, alt_adj, hdop=hdop, t_now=t_now)
                 self._gps_count += 1
+                # Record GPS for flight data
+                if self.flight_recorder and self.flight_recorder.is_recording:
+                    # Convert to NED using MHT's GPS origin
+                    if self.mht._gps_origin:
+                        import math as _m
+                        _o = self.mht._gps_origin
+                        _dlat = _m.radians(lat - _o['lat'])
+                        _dlon = _m.radians(lon - _o['lon'])
+                        _n = _dlat * 6371000.0
+                        _e = _dlon * 6371000.0 * _m.cos(_m.radians(_o['lat']))
+                        _d = -(alt - _o['alt'])
+                        self.flight_recorder.record_gps(
+                            t_now, _n, _e, _d, hdop)
+
+        elif mtype == "GPS_RTCM_DATA":
+            # Forward Mission Planner RTCM to F9P over serial
+            if self.rtk_collector and hasattr(msg, 'data') and hasattr(msg, 'len'):
+                # `data` is an array of uint8, `len` is the number of valid bytes
+                rtcm_bytes = bytes(msg.data[:msg.len])
+                self.rtk_collector.write_to_serial(rtcm_bytes)
 
         elif mtype == "OBSTACLE_DISTANCE":
             # Lidar data ingestion
@@ -345,7 +532,7 @@ class INSNavSys:
                     if self._lidar_future is not None:
                         safe_dist = self._lidar_future.result()
                         if safe_dist > 0:
-                            self.eskf.update_lidar_range(safe_dist, weight=self.params["LR_WEIGHT"])
+                            self.mht.update_lidar_range(safe_dist, weight=self.params["LR_WEIGHT"])
 
                             if safe_dist < self.params["OBS_THRESH"]:
                                 self.bridge.send_statustext(f"OBSTACLE CLOSE: {safe_dist:.1f}m", 3)
@@ -374,7 +561,15 @@ class INSNavSys:
             ]])
             radar_vel = self.lidar_radar.process_ti_radar(target)
             if np.any(radar_vel):
-                self.eskf.update_radar_velocity(*radar_vel, weight=self.params["LR_WEIGHT"])
+                self.mht.update_radar_velocity(*radar_vel, weight=self.params["LR_WEIGHT"])
+
+        elif mtype == "MOCK_LIVOX_CLOUD":
+            # Mock bridge for TRN point cloud injection
+            points = np.array(msg.points)
+            # Use alt above ground level = -pos[2] (assuming flat ground for now)
+            res = self.trn.process_lidar_scan(points, self.eskf.state["pos"], -self.eskf.state["pos"][2], t_now)
+            if res is not None:
+                self.mht.update_external(res["z"], res["z_pred"], res["H"], res["R"], source="TRN")
 
         elif mtype == "PARAM_REQUEST_LIST":
             self._send_all_params()
@@ -389,7 +584,7 @@ class INSNavSys:
                 log.info(f"Param updated via MAVLink: {param_id} = {msg.param_value}")
 
         elif mtype == "OPTICAL_FLOW_RAD":
-            if self.eskf._initialized:
+            if self.mht._initialized:
                 # 1. Require valid rangefinder
                 if not hasattr(msg, 'distance') or msg.distance <= 0.05:
                     return
@@ -400,40 +595,75 @@ class INSNavSys:
                 if gyro_x_rate > 1.5 or gyro_y_rate > 1.5:  # ~85 deg/s
                     return
 
-                flow_vx = (msg.integrated_x - msg.integrated_xgyro)
-                flow_vy = (msg.integrated_y - msg.integrated_ygyro)
+                # Check if we should use raw flow and compensate in MHT
+                use_raw_flow = self.params.get("OPTFLOW_RAW", True)
+                
+                if use_raw_flow:
+                    # Pass raw uncompensated integrated flow
+                    flow_vx = msg.integrated_x
+                    flow_vy = msg.integrated_y
+                else:
+                    # Flight controller already did (integrated_x - integrated_xgyro)
+                    flow_vx = (msg.integrated_x - msg.integrated_xgyro)
+                    flow_vy = (msg.integrated_y - msg.integrated_ygyro)
+                
                 dt_flow = msg.integration_time_us / 1e6
 
                 if dt_flow > 0:
                     # 3. Height scaling: angular_rate (rad/s) × height (m) = velocity (m/s)
                     vx = (flow_vx / dt_flow) * msg.distance
                     vy = (flow_vy / dt_flow) * msg.distance
-                    self.eskf.update_optical_flow(
-                        vx, vy, msg.distance, msg.quality)
+                    self.mht.update_optical_flow(
+                        vx, vy, msg.distance, msg.quality,
+                        enable_rot_comp=use_raw_flow)
 
         elif mtype == "VISION_POSITION_ESTIMATE":
             # VIO fusion (T265 / ORB-SLAM3)
             if self.vio.is_active:
                 pos_vio = np.array([msg.x, msg.y, msg.z])
-                # T265 provides quaternion; fallback to identity if unavailable
+                latency_s = self.params.get("VIO_LATENCY_S", 0.05)  # 50ms default delay
+                t_meas = t_now - latency_s
+
                 quat_vio = np.array([1.0, 0.0, 0.0, 0.0])
                 if hasattr(msg, 'q') and msg.q is not None:
                     quat_vio = np.array(msg.q)
-                confidence = 0.8  # TODO: parse tracking confidence from T265 via STATUSTEXT
-                result = self.vio.process_vio_update(
-                    t_now, pos_vio, quat_vio, confidence)
-                if result is not None:
-                    self.eskf.update_external(
-                        result["pos_ned"],
-                        self.eskf.state["pos"],
-                        result["H_pos"], result["R_pos"],
-                        source="VIO_pos")
-                    self.eskf.update_external(
-                        np.array([result["yaw_ned"]]),
-                        np.array([self.eskf.state["euler"][2]]),
-                        result["H_yaw"], result["R_yaw"],
-                        source="VIO_yaw")
-                    self._vio_count += 1
+                confidence = 0.8
+
+                if self.params.get("OOSM_ENABLE", 1.0) > 0.5 and len(self._oosm_buffer) > 0:
+                    replay_idx = -1
+                    for i in range(len(self._oosm_buffer)-1, -1, -1):
+                        if self._oosm_buffer[i][0] <= t_meas:
+                            replay_idx = i
+                            break
+                            
+                    if replay_idx != -1:
+                        # 2. Rewind
+                        _, x_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
+                        self.eskf.x = x_rewind.copy()
+                        self.eskf.U = U_rewind.copy()
+                        self.eskf.P = U_rewind.T @ U_rewind
+                        
+                        # 3. Apply
+                        result = self.vio.process_vio_update(t_meas, pos_vio, quat_vio, confidence)
+                        if result is not None:
+                            self.eskf.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
+                            self.eskf.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
+                            self._vio_count += 1
+                        
+                        # 4. Re-propagate
+                        for i in range(replay_idx, len(self._oosm_buffer)):
+                            _, _, _, a, g, dt_hist = self._oosm_buffer[i]
+                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
+                            self.eskf.predict(a, g, dt_hist)
+                else:
+                    # Taylor extrapolation via Taylor
+                    v_ned = self.eskf.x[3:6]
+                    pos_vio_adj = pos_vio + v_ned * latency_s
+                    result = self.vio.process_vio_update(t_now, pos_vio_adj, quat_vio, confidence)
+                    if result is not None:
+                        self.eskf.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
+                        self.eskf.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
+                        self._vio_count += 1
 
         # ── Safety & Health ─────────────────────────────────────────
         pos = self.eskf.state["pos"]
@@ -520,6 +750,28 @@ class INSNavSys:
             self.bridge.send_statustext("INS CRITICAL FAULT - DISARM", 2)
             # You could add actual MAV_CMD_COMPONENT_ARM_DISARM here
 
+        # Phase 2 Emergency Landing Trigger
+        self._check_emergency_landing(t_now)
+
+    def _check_emergency_landing(self, t_now):
+        # Trigger LAND mode if uncertainty > 20m and filter is in FAULT
+        if self.eskf.health == EKFHealth.FAULT:
+            pos_var = self.eskf.P[0,0] + self.eskf.P[1,1]
+            if pos_var > 400.0:  # std > 20m
+                if getattr(self, "_emergency_land_triggered", False) == False:
+                    log.critical("TOTAL OBSERVABILITY COLLAPSE (Uncertainty > 20m). INITIATING EMERGENCY LANDING!")
+                    self.bridge.send_statustext("NAV EMERGENCY: LANDING", 1)
+                    # MAV_CMD_NAV_LAND = 21
+                    try:
+                        self.bridge._conn.mav.command_long_send(
+                            self.bridge._conn.target_system, self.bridge._conn.target_component,
+                            21, 0,
+                            0, 0, 0, 0, 0, 0, 0
+                        )
+                    except Exception as e:
+                        log.error(f"Failed to send emergency land command: {e}")
+                    self._emergency_land_triggered = True
+
         health = self.eskf.health
 
         # Initialize VIO alignment once ESKF is healthy
@@ -543,6 +795,10 @@ class INSNavSys:
             self.bridge.send_statustext("INS: Vision enabled", 6)
 
     # ── sensor initialization ──────────────────────────────────
+    @property
+    def eskf(self):
+        return self.mht.primary
+
     def _try_initialize(self):
         accel_arr = np.array(self._init_accel_buf)
         mag_arr = np.array(self._init_mag_buf) if self._init_mag_buf else None
@@ -623,6 +879,16 @@ class INSNavSys:
             timing_ms=self.time_sync.latency_s * 1000.0
         )
 
+        # Flight recorder: ESKF state + RTK ground truth
+        if self.flight_recorder and self.flight_recorder.is_recording:
+            self.flight_recorder.record_eskf_state(
+                t, self.eskf.state, self.eskf.P,
+                self.eskf.health.name, self.eskf.baro_bias)
+            # Harvest RTK fixes
+            if self.rtk_collector and self.rtk_collector.last_fix:
+                fix = self.rtk_collector.last_fix
+                self.flight_recorder.record_rtk(t, fix)
+
     def _print_state(self, t: float):
         elapsed = t - self._start_time
         pos = self.eskf.state["pos"]
@@ -648,13 +914,32 @@ class INSNavSys:
         eff_hz  = self._imu_count / max(elapsed, 0.001)
         stats   = self.loop_monitor.get_stats()
 
+        rtk_info = ""
+        if self.rtk_collector:
+            rs = self.rtk_collector.stats
+            rtk_info = (f"  RTK: {rs.rtk_fixed_count} FIXED / "
+                        f"{rs.total_fixes} total")
+            
+            # Mission Planner Telemetry Visualization
+            if self.rtk_collector.last_fix:
+                fix = self.rtk_collector.last_fix
+                self.bridge.send_named_value_int("RTK_Fix", fix.fix_type)
+                self.bridge.send_named_value_int("RTK_Sats", fix.n_sats)
+                self.bridge.send_named_value_float("RTK_HAcc", fix.h_acc_m)
+
+        print(f"| Updates     | IMU:{self._imu_count} Baro:{self._baro_count} Mag:{self._mag_count} GPS:{len(self._oosm_buffer)}")
+        
+        # Health Dashboard
+        print(f"| Health      | Cholesky Fails: {self.eskf.cholesky_failures} | Cov Repairs: {self.eskf.covariance_repairs} | Spike count: {self.eskf.innovation_spikes}")
+        print(f"| Condition U | {self.eskf.cond_num:.2e} (Min diag: {self.eskf.min_diag_U:.2e}, Max diag: {self.eskf.max_diag_U:.2e})")
+
         log.info(
             f"Stats @ {elapsed:.1f}s — "
             f"IMU={self._imu_count} ({eff_hz:.0f} Hz)  "
             f"Baro={self._baro_count}  Mag={self._mag_count}  "
             f"GPS={self._gps_count}  VIO={self._vio_count}  "
             f"Loop avg={stats['avg']:.1f}ms max={stats['max']:.1f}ms  "
-            f"Overruns={stats['overruns']}"
+            f"Overruns={stats['overruns']}{rtk_info}"
         )
 
     def _print_final_stats(self):
@@ -674,6 +959,13 @@ class INSNavSys:
         pos = self.eskf.state["pos"]
         log.info(f"  Final pos (m) : X={pos[0]:.2f}  Y={pos[1]:.2f}  Z={pos[2]:.2f}")
 
+        if self.rtk_collector:
+            log.info("  ── RTK Collection ──")
+            log.info(self.rtk_collector.summary())
+        if self.flight_recorder and self.flight_recorder.session_dir:
+            log.info(f"  Flight data   : {self.flight_recorder.session_dir}")
+            log.info(f"  Samples       : {self.flight_recorder.sample_counts}")
+
 
 # ══════════════════════════════════════════════════════════════
 def parse_args():
@@ -684,6 +976,8 @@ def parse_args():
         default="/dev/ttyAMA0",
         help="MAVLink connection string",
     )
+    p.add_argument("--rtk", action="store_true",
+                   help="Enable RTK ground truth collection")
     p.add_argument("--baud", "-b",  type=int, default=921600)
     p.add_argument("--hz",         type=int, default=100,
                    help="EKF update rate in Hz (50 or 100)")
@@ -692,5 +986,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    ins  = INSNavSys(args.connection, args.baud, args.hz)
+    ins  = INSNavSys(args.connection, args.baud, args.hz,
+                     rtk_enabled=args.rtk)
     ins.run()
