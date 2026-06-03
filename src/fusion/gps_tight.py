@@ -264,7 +264,7 @@ class TightGPSCoupling:
         # Each satellite gives: ρ_pred = |pos - sat_pos| + clock_bias
         z = np.zeros(n)           # measured pseudoranges
         z_pred = np.zeros(n)      # predicted pseudoranges
-        H = np.zeros((n, 15))     # Jacobian (position states only: dp_x, dp_y, dp_z)
+        H = np.zeros((n, 20))     # Jacobian (pos + clock bias states)
         R = np.zeros((n, n))      # measurement noise
 
         for i, meas in enumerate(valid_meas):
@@ -285,8 +285,10 @@ class TightGPSCoupling:
             # Measured pseudorange
             z[i] = meas.pseudorange
 
-            # Jacobian: dρ/dp = unit_los (3 position states)
             H[i, 0:3] = unit_los
+
+            # Clock bias state: dρ/d_clk = 1.0
+            H[i, 16] = 1.0  # receiver clock bias (error state index)
 
             # CN0-scaled noise: higher CN0 = lower noise
             cn0_factor = max(1.0, 45.0 / max(meas.cn0, 20.0))
@@ -314,23 +316,26 @@ class TightGPSCoupling:
 
 def ned_to_ecef(ned: np.ndarray, origin_lat: float,
                 origin_lon: float, origin_alt: float) -> np.ndarray:
-    """Convert NED position to ECEF for tight coupling.
-
-    Simple spherical model — adequate for short-range flights (<10km).
-    """
+    """Convert NED position to ECEF for tight coupling using WGS84."""
     lat_rad = math.radians(origin_lat)
     lon_rad = math.radians(origin_lon)
 
+    # WGS84 ellipsoid constants
+    a = 6378137.0
+    e2 = 0.00669437999014
+
+    sin_lat = math.sin(lat_rad)
+    cos_lat = math.cos(lat_rad)
+    sin_lon = math.sin(lon_rad)
+    cos_lon = math.cos(lon_rad)
+
     # Origin ECEF
-    N = R_EARTH  # simplified (no ellipsoid correction)
-    x0 = (N + origin_alt) * math.cos(lat_rad) * math.cos(lon_rad)
-    y0 = (N + origin_alt) * math.cos(lat_rad) * math.sin(lon_rad)
-    z0 = (N + origin_alt) * math.sin(lat_rad)
+    N = a / math.sqrt(1.0 - e2 * sin_lat**2)
+    x0 = (N + origin_alt) * cos_lat * cos_lon
+    y0 = (N + origin_alt) * cos_lat * sin_lon
+    z0 = (N * (1.0 - e2) + origin_alt) * sin_lat
 
     # NED to ECEF rotation
-    sin_lat, cos_lat = math.sin(lat_rad), math.cos(lat_rad)
-    sin_lon, cos_lon = math.sin(lon_rad), math.cos(lon_rad)
-
     R_ned_ecef = np.array([
         [-sin_lat * cos_lon, -sin_lon, -cos_lat * cos_lon],
         [-sin_lat * sin_lon,  cos_lon, -cos_lat * sin_lon],
