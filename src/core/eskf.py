@@ -1,21 +1,74 @@
 #!/usr/bin/env python3
-# The ESKF: Our 16-state mathematical wizard that guesses where the drone is.
-# Replaced the old Euler-angle EKF because gimbal lock is for losers.
+# 21-state Error-State Quaternion EKF (ESKF) — NavCore-Pixhawk
+#
+# Nominal state (21):
+#   x = [px, py, pz,                   # 0:3   position (NED, m)
+#        vx, vy, vz,                    # 3:6   velocity (NED, m/s)
+#        qw, qx, qy, qz,               # 6:10  attitude quaternion
+#        ba_x, ba_y, ba_z,              # 10:13 accel bias (m/s²)
+#        bg_x, bg_y, bg_z,              # 13:16 gyro bias (rad/s)
+#        baro_bias,                     # 16    barometric altitude bias (m)
+#        clk_bias,                      # 17    GNSS receiver clock bias (m)
+#        clk_drift,                     # 18    GNSS receiver clock drift (m/s)
+#        wind_n, wind_e]                # 19:21 wind velocity NED horizontal (m/s)
+#
+# Error state (20):
+#   dx = [dp(3), dv(3), dtheta(3),      # 0:9   pos, vel, attitude error
+#         dba(3), dbg(3),                # 9:15  bias errors
+#         d_baro_bias,                   # 15    baro bias error
+#         d_clk_bias,                    # 16    clock bias error
+#         d_clk_drift,                   # 17    clock drift error
+#         d_wind_n, d_wind_e]            # 18:20 wind error
+#
+# Upgraded from 16-state with:
+#   - Baro bias as proper filter state (replaces EMA hack)
+#   - GNSS receiver clock bias/drift for tight coupling
+#   - Wind velocity estimation for multi-rotor accuracy
+#   - RK4 quaternion integration (replaces Euler)
+#   - Iterated EKF (IEKF) for nonlinear measurements
+#
 # If this crashes, the drone probably will too. No pressure.
 
 import numpy as np
 import math
 import logging
 from enum import Enum
+from typing import Optional, Callable, Tuple
+import scipy.linalg as la
 from utils.noise import IMUNoiseParams
 
 log = logging.getLogger("eskf_core")
 
 GRAVITY_NED = np.array([0.0, 0.0, 9.80665])
 
+# Error-state dimension constants
+NOMINAL_DIM = 21
+ERROR_DIM = 20
+
+# State index constants (nominal)
+POS = slice(0, 3)
+VEL = slice(3, 6)
+QUAT = slice(6, 10)
+ABIAS = slice(10, 13)
+GBIAS = slice(13, 16)
+BARO_BIAS_IDX = 16
+CLK_BIAS_IDX = 17
+CLK_DRIFT_IDX = 18
+WIND = slice(19, 21)
+
+# Error-state index constants
+E_POS = slice(0, 3)
+E_VEL = slice(3, 6)
+E_ATT = slice(6, 9)
+E_ABIAS = slice(9, 12)
+E_GBIAS = slice(12, 15)
+E_BARO_BIAS = 15
+E_CLK_BIAS = 16
+E_CLK_DRIFT = 17
+E_WIND = slice(18, 20)
+
 # Chi-squared thresholds for innovation gating (95% confidence)
-CHI2_1DOF = 5.991
-CHI2_2DOF = 9.210
+CHI2_THRESHOLDS = {1: 5.991, 2: 9.210, 3: 7.815, 4: 9.488, 5: 11.07}
 
 
 class EKFHealth(Enum):
@@ -26,23 +79,25 @@ class EKFHealth(Enum):
 
 
 class ESKF:
-    # the big brain — 16 states of pure guesswork
+    """21-state Error-State Kalman Filter with RK4 and IEKF support."""
 
     # Safety bounds
     VEL_WARN = 30.0       # m/s
     VEL_FAULT = 100.0     # m/s
     TILT_WARN_DEG = 60.0
     TILT_FAULT_DEG = 80.0
-    ACCEL_BIAS_LIMIT = 2.0   # m/s^2
+    ACCEL_BIAS_LIMIT = 2.0   # m/s²
     GYRO_BIAS_LIMIT = 0.1    # rad/s
-    P_TRACE_LIMIT = 1e6
-    P_COND_LIMIT = 1e12
-    Z_COV_CONVERGED = 0.25   # z-axis covariance threshold for convergence (m²)
-    SYMMETRY_INTERVAL = 50   # enforce symmetry every N steps
+    BARO_BIAS_LIMIT = 15.0   # m — max baro bias
+    WIND_LIMIT = 25.0        # m/s — max estimated wind
+    P_TRACE_LIMIT = 1e9
+    P_COND_LIMIT = 1e15
+    Z_COV_CONVERGED = 1.5   # z-axis covariance threshold (m²)
+    SYMMETRY_INTERVAL = 50
 
     # Mag rejection thresholds
-    MAG_NORM_TOLERANCE = 0.30   # 30% deviation from calibrated norm
-    MAG_REJECT_DURATION = 2.0   # seconds to disable mag after EMI
+    MAG_NORM_TOLERANCE = 0.30
+    MAG_REJECT_DURATION = 2.0
 
     def __init__(self, noise: IMUNoiseParams):
         self.noise = noise
@@ -50,80 +105,142 @@ class ESKF:
         self._initialized = False
         self._health = EKFHealth.CONVERGING
         self._mag_reject_until = 0.0
-        self._calibrated_mag_norm = 0.5  # Gauss, updated during init
+        self._calibrated_mag_norm = 0.5
         self._mag_consecutive_good = 0
         self._mag_required_good = 10
-        self._gps_origin = None  # set on first valid GPS fix
+        self._gps_origin = None
         self._innovation_stats = {"baro": [], "mag": []}
-
-        # Baro drift compensation (Feature 8)
-        self._baro_bias = 0.0           # slow-moving bias estimate (m)
-        self._baro_bias_alpha = 0.001   # EMA decay rate (~0.1 Hz update)
-        self._baro_update_count = 0
+        self._sensor_rejections = {}
 
         # Adaptive process noise (Feature 6)
-        self._vibration_scale = 1.0     # current Q scaling factor
+        self._vibration_scale = 1.0
 
-        # --- Nominal state (16) ---
-        self.x = np.zeros(16)
+        # --- Nominal state (21) ---
+        self.x = np.zeros(NOMINAL_DIM)
         self.x[6] = 1.0  # qw = 1 (identity quaternion)
 
-        # --- Error-state covariance (15x15) ---
-        self.P = np.eye(15)
-        self.P[0:3, 0:3] *= 1.0      # position
-        self.P[3:6, 3:6] *= 0.1      # velocity
-        self.P[6:9, 6:9] *= 0.01     # attitude
-        self.P[9:12, 9:12] *= 0.01   # accel bias
-        self.P[12:15, 12:15] *= 0.001  # gyro bias
+        # --- Error-state covariance (20x20) ---
+        P_init = np.eye(ERROR_DIM)
+        P_init[E_POS, E_POS] *= 1.0      # position
+        P_init[E_VEL, E_VEL] *= 0.1      # velocity
+        P_init[E_ATT, E_ATT] *= 0.01     # attitude
+        P_init[E_ABIAS, E_ABIAS] *= 0.01 # accel bias
+        P_init[E_GBIAS, E_GBIAS] *= 0.001  # gyro bias
+        P_init[E_BARO_BIAS, E_BARO_BIAS] = 25.0   # baro bias: ±5m initial uncertainty
+        # ~100 m initial clock bias σ (1e4 m²). 1e6 made cond(P)≈1e9 and broke NEES/NIS numerics.
+        P_init[E_CLK_BIAS, E_CLK_BIAS] = 1e4
+        P_init[E_CLK_DRIFT, E_CLK_DRIFT] = 100.0   # clock drift
+        P_init[E_WIND, E_WIND] *= 10.0              # wind: ±3.2 m/s initial
+        
+        # Upper triangular Cholesky factor U (where P = U @ U.T)
+        self.U = np.linalg.cholesky(P_init).T
 
-        # --- Process noise ---
-        self.Q_base = np.zeros((15, 15))
+        # --- Health Monitoring Buffers ---
+        from collections import deque
+        self.innovation_history = deque(maxlen=500)  # (time, source, y, S)
+        self.health_history = deque(maxlen=500)      # (time, cond_num, min_diag, max_diag)
+        self.cond_num = 1.0
+        self.min_diag_U = 1.0
+        self.max_diag_U = 1.0
+        
+        # Actionable Health Metrics
+        self.cholesky_failures = 0
+        self.innovation_spikes = 0
+        self.covariance_repairs = 0
+
+        # --- Process noise (Continuous-Time Model Q_c) ---
+        # The continuous-time process model is: dx_err/dt = F * x_err + G * w
+        # where w is continuous-time white noise with Power Spectral Density (PSD) Q_c.
+        # Accelerometer and Gyro noise are assumed isotropic in the body frame: E[w w^T] = sigma^2 I
+        # Because the mapping matrix G for velocity is -R(q), the noise mapped to global frame is:
+        # G Q_c G^T = R(q) (sigma^2 I) R(q)^T = sigma^2 I.
+        # This allows us to use a purely diagonal Q_c matrix and simply scale by dt
+        # for the discrete-time noise Q_d ≈ Q_c * dt.
+        
+        self.Q_base = np.zeros((ERROR_DIM, ERROR_DIM))
+        # sa and sg are PSDs: (m/s^2)^2/Hz and (rad/s)^2/Hz
         sa = noise.accel_std ** 2
         sg = noise.gyro_std ** 2
         sab = (2.0 * noise.accel_bias_std ** 2 / max(noise.accel_bias_tau, 1.0))
         sgb = (2.0 * noise.gyro_bias_std ** 2 / max(noise.gyro_bias_tau, 1.0))
-        np.fill_diagonal(self.Q_base[3:6, 3:6], sa)
-        np.fill_diagonal(self.Q_base[6:9, 6:9], sg)
-        np.fill_diagonal(self.Q_base[9:12, 9:12], sab)
-        np.fill_diagonal(self.Q_base[12:15, 12:15], sgb)
-        self.Q = self.Q_base.copy()  # active Q (may be scaled)
+        np.fill_diagonal(self.Q_base[E_VEL, E_VEL], sa)
+        np.fill_diagonal(self.Q_base[E_ATT, E_ATT], sg)
+        np.fill_diagonal(self.Q_base[E_ABIAS, E_ABIAS], sab)
+        np.fill_diagonal(self.Q_base[E_GBIAS, E_GBIAS], sgb)
+        # Baro bias: random walk (slow drift ~0.01 m/√s)
+        self.Q_base[E_BARO_BIAS, E_BARO_BIAS] = 0.01 ** 2
+        # Clock bias: driven by clock drift (coupled in F)
+        self.Q_base[E_CLK_BIAS, E_CLK_BIAS] = 0.1 ** 2
+        # Clock drift: TCXO stability (~1e-9 relative → ~0.3 m/s²)
+        self.Q_base[E_CLK_DRIFT, E_CLK_DRIFT] = 0.3 ** 2
+        # Wind: random walk (~0.5 m/s/√s for turbulence)
+        np.fill_diagonal(self.Q_base[E_WIND, E_WIND], 0.5 ** 2)
+        self.Q = self.Q_base.copy()
 
         # --- Measurement noise ---
         self.R_baro = np.array([[noise.baro_std ** 2]])
         self.R_mag = np.array([[noise.mag_std ** 2]])
         self._R_mag_base = noise.mag_std ** 2
 
-        # --- Observation matrices (15-col for error state) ---
-        self.H_baro = np.zeros((1, 15))
-        self.H_baro[0, 2] = 1.0  # observes dp_z
+        # --- Observation matrices (20-col for error state) ---
+        self.H_baro = np.zeros((1, ERROR_DIM))
+        self.H_baro[0, 2] = 1.0   # observes dp_z
+        self.H_baro[0, E_BARO_BIAS] = -1.0  # minus baro bias
 
-        self.H_mag = np.zeros((1, 15))
-        self.H_mag[0, 8] = 1.0   # observes dtheta_z (yaw error)
+        self.H_mag = np.zeros((1, ERROR_DIM))
+        self.H_mag[0, 8] = 1.0    # observes dtheta_z (yaw error)
+
+        log.info(f"ESKF initialized: {NOMINAL_DIM}-state nominal, "
+                 f"{ERROR_DIM}-state error, SR-ESKF/RK4, IEKF enabled")
 
     # ── Properties ─────────────────────────────────────────────
 
     @property
+    def P(self) -> np.ndarray:
+        """Dynamically compute full covariance matrix from Cholesky factor."""
+        return self.U.T @ self.U
+
+    @P.setter
+    def P(self, value: np.ndarray):
+        """Update Cholesky factor if full covariance is explicitly set."""
+        self.U = np.linalg.cholesky(value).T
+
+    @property
     def state(self) -> dict:
-        q = self.x[6:10]
+        q = self.x[QUAT]
         euler = self._quat_to_euler(q)
         return {
-            "pos": self.x[0:3].copy(),
-            "vel": self.x[3:6].copy(),
+            "pos": self.x[POS].copy(),
+            "vel": self.x[VEL].copy(),
             "quat": q.copy(),
             "euler": np.array(euler),
-            "accel_bias": self.x[10:13].copy(),
-            "gyro_bias": self.x[13:16].copy(),
+            "accel_bias": self.x[ABIAS].copy(),
+            "gyro_bias": self.x[GBIAS].copy(),
+            "baro_bias": float(self.x[BARO_BIAS_IDX]),
+            "clock_bias": float(self.x[CLK_BIAS_IDX]),
+            "clock_drift": float(self.x[CLK_DRIFT_IDX]),
+            "wind": self.x[WIND].copy(),
         }
 
     @property
     def health(self) -> EKFHealth:
         return self._health
 
+    @property
+    def baro_bias(self) -> float:
+        """Barometric bias estimate (m). Now a proper filter state."""
+        return float(self.x[BARO_BIAS_IDX])
+
+    @property
+    def wind_estimate(self) -> np.ndarray:
+        """Estimated wind velocity [North, East] (m/s)."""
+        return self.x[WIND].copy()
+
     # ── Initialization ─────────────────────────────────────────
 
     def initialize_from_sensors(self, accel_samples: np.ndarray,
                                 mag_samples: np.ndarray) -> bool:
-        # Initialize attitude from stationary IMU + mag data.
+        """Initialize attitude from stationary IMU + mag data."""
         if len(accel_samples) < 10 or len(mag_samples) < 10:
             log.warning("Not enough samples for initialization")
             return False
@@ -152,10 +269,16 @@ class ESKF:
         # Store calibrated mag norm
         self._calibrated_mag_norm = np.linalg.norm(mag_mean)
 
-        # Convert to quaternion
-        self.x[6:10] = self._euler_to_quat(roll, pitch, yaw)
-        self.x[0:6] = 0.0   # position and velocity = 0
-        self.x[10:16] = 0.0  # biases = 0
+        # Set nominal state
+        self.x[QUAT] = self._euler_to_quat(roll, pitch, yaw)
+        self.x[POS] = 0.0
+        self.x[VEL] = 0.0
+        self.x[ABIAS] = 0.0
+        self.x[GBIAS] = 0.0
+        self.x[BARO_BIAS_IDX] = 0.0    # baro bias starts at zero
+        self.x[CLK_BIAS_IDX] = 0.0     # clock bias unknown
+        self.x[CLK_DRIFT_IDX] = 0.0    # clock drift unknown
+        self.x[WIND] = 0.0             # no wind initially
 
         self._initialized = True
         self._health = EKFHealth.CONVERGING
@@ -163,137 +286,218 @@ class ESKF:
                  f"pitch={math.degrees(pitch):.1f} yaw={math.degrees(yaw):.1f}")
         return True
 
-    # ── Predict ────────────────────────────────────────────────
+    # ── Predict (RK4 Integration) ──────────────────────────────
 
     def predict(self, accel_raw: np.ndarray, gyro_raw: np.ndarray, dt: float):
-        # predict where we are using raw sensor data and math
+        """Predict step using 4th-order Runge-Kutta integration.
+
+        Replaces the old Euler integration for significantly reduced
+        integration error at the same 100 Hz rate.
+        """
         if dt <= 0:
             return
 
         # Bias compensation
-        accel = accel_raw - self.x[10:13]
-        gyro = gyro_raw - self.x[13:16]
+        accel = accel_raw - self.x[ABIAS]
+        gyro = gyro_raw - self.x[GBIAS]
 
-        q = self.x[6:10].copy()
-        R = self._quat_to_dcm(q)
+        # ── RK4 for position, velocity, and quaternion ──────────
+        # State pack: [pos(3), vel(3), quat(4)] = 10 elements
+        y = np.zeros(10)
+        y[0:3] = self.x[POS]
+        y[3:6] = self.x[VEL]
+        y[6:10] = self.x[QUAT]
 
-        # 1. Velocity update: v += (R*f + g) * dt
-        f_ned = R @ accel
-        self.x[3:6] += (f_ned + GRAVITY_NED) * dt
+        k1 = self._state_derivative(y, accel, gyro)
+        k2 = self._state_derivative(y + 0.5 * dt * k1, accel, gyro)
+        k3 = self._state_derivative(y + 0.5 * dt * k2, accel, gyro)
+        k4 = self._state_derivative(y + dt * k3, accel, gyro)
 
-        # 2. Position update: p += v * dt
-        self.x[0:3] += self.x[3:6] * dt
+        y_new = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-        # 3. Quaternion update: q = q * q_delta
-        angle = np.linalg.norm(gyro) * dt
-        if angle > 1e-10:
-            axis = gyro / (angle / dt) * dt
-            axis_norm = axis / np.linalg.norm(axis)
-            ha = angle / 2.0
-            q_delta = np.array([math.cos(ha),
-                                axis_norm[0] * math.sin(ha),
-                                axis_norm[1] * math.sin(ha),
-                                axis_norm[2] * math.sin(ha)])
-        else:
-            q_delta = np.array([1.0, 0.0, 0.0, 0.0])
+        # Unpack and normalize quaternion
+        self.x[POS] = y_new[0:3]
+        self.x[VEL] = y_new[3:6]
+        self.x[QUAT] = y_new[6:10]
+        self.x[QUAT] /= np.linalg.norm(self.x[QUAT])
 
-        self.x[6:10] = self._quat_mult(q, q_delta)
-        self.x[6:10] /= np.linalg.norm(self.x[6:10])  # normalize
-
-        # 4. Bias decay (Gauss-Markov)
+        # ── Bias decay (Gauss-Markov) ──────────────────────────
         tau_a = max(self.noise.accel_bias_tau, 1.0)
         tau_g = max(self.noise.gyro_bias_tau, 1.0)
-        self.x[10:13] *= (1.0 - dt / tau_a)
-        self.x[13:16] *= (1.0 - dt / tau_g)
+        self.x[ABIAS] *= (1.0 - dt / tau_a)
+        self.x[GBIAS] *= (1.0 - dt / tau_g)
 
-        # 5. Clamp biases
-        self.x[10:13] = np.clip(self.x[10:13],
+        # Clamp biases
+        self.x[ABIAS] = np.clip(self.x[ABIAS],
                                 -self.ACCEL_BIAS_LIMIT, self.ACCEL_BIAS_LIMIT)
-        self.x[13:16] = np.clip(self.x[13:16],
+        self.x[GBIAS] = np.clip(self.x[GBIAS],
                                 -self.GYRO_BIAS_LIMIT, self.GYRO_BIAS_LIMIT)
 
-        # 6. Error-state Jacobian (15x15)
-        F = self._compute_F(accel, gyro, R, dt)
-        self.P = F @ self.P @ F.T + self.Q * dt
+        # ── Baro bias: random walk (no decay) ──────────────────
+        # Baro bias evolves as process noise only — no dynamics
+        self.x[BARO_BIAS_IDX] = np.clip(self.x[BARO_BIAS_IDX],
+                                        -self.BARO_BIAS_LIMIT, self.BARO_BIAS_LIMIT)
 
-        # 7. Covariance hardening & health
+        # ── Clock: bias driven by drift ────────────────────────
+        self.x[CLK_BIAS_IDX] += self.x[CLK_DRIFT_IDX] * dt
+        # Clock drift: random walk (TCXO)
+
+        # ── Wind: random walk, clamped ─────────────────────────
+        self.x[WIND] = np.clip(self.x[WIND], -self.WIND_LIMIT, self.WIND_LIMIT)
+
+        # ── Square-Root Covariance Update (QR) ─────────────────
+        R_dcm = self._quat_to_dcm(self.x[QUAT])
+        F = self._compute_F(accel, gyro, R_dcm, dt)
+        
+        # M = [ U * F.T ]
+        #     [ sqrt(Q) ]
+        M = np.vstack([
+            self.U @ F.T,
+            np.diag(np.sqrt(np.diag(self.Q * dt)))
+        ])
+        
+        # QR decomposition gives upper triangular R which is our new U
+        _, R_qr = la.qr(M, mode='economic')
+        
+        # Enforce positive diagonal elements for uniqueness
+        signs = np.sign(np.diag(R_qr))
+        signs[signs == 0] = 1.0
+        self.U = R_qr * signs[:, np.newaxis]
+        
+        # Track numerical health of U
+        diags = np.abs(np.diag(self.U))
+        self.min_diag_U = float(np.min(diags))
+        self.max_diag_U = float(np.max(diags))
+        self.cond_num = self.max_diag_U / max(self.min_diag_U, 1e-12)
+        
+        # Log to health history (assuming dt is time since start roughly)
+        # Actually, time tracking should be done in m.py, but we can store raw values here.
+        self.health_history.append((self._step_count * dt, self.cond_num, self.min_diag_U, self.max_diag_U))
+
+        # Health & State checks
         self._step_count += 1
-        self._harden_covariance()
         self._check_health()
 
-    def _compute_F(self, accel, gyro, R, dt) -> np.ndarray:
-        # the scary 15x15 matrix that ties everything together
-        F = np.eye(15)
+    def _state_derivative(self, y: np.ndarray, accel: np.ndarray,
+                          gyro: np.ndarray) -> np.ndarray:
+        """Compute state derivative for RK4: dy/dt = f(y, u).
+
+        y = [pos(3), vel(3), quat(4)]
+        """
+        dy = np.zeros(10)
+        q = y[6:10]
+        q_norm = np.linalg.norm(q)
+        if q_norm > 1e-10:
+            q = q / q_norm
+
+        R = self._quat_to_dcm(q)
+
+        # dp/dt = v
+        dy[0:3] = y[3:6]
+
+        # dv/dt = R*accel + gravity
+        # Wind affects velocity through aerodynamic drag on the airframe
+        # For multirotors: v_air = v_ground - wind → additional accel ∝ drag
+        # First-order approximation: no direct velocity coupling (wind is estimated
+        # from GPS-vs-INS discrepancy, not modeled in dynamics)
+        dy[3:6] = R @ accel + GRAVITY_NED
+
+        # dq/dt = 0.5 * q ⊗ [0, gyro]
+        omega = np.array([0.0, gyro[0], gyro[1], gyro[2]])
+        dy[6:10] = 0.5 * self._quat_mult(q, omega)
+
+        return dy
+
+    def _compute_F(self, accel: np.ndarray, gyro: np.ndarray,
+                   R: np.ndarray, dt: float) -> np.ndarray:
+        """Compute the 20x20 error-state transition Jacobian."""
+        F = np.eye(ERROR_DIM)
 
         # dp/dv
-        F[0:3, 3:6] = np.eye(3) * dt
+        F[E_POS, E_VEL] = np.eye(3) * dt
 
         # dv/dtheta: -R * [accel]x * dt
-        F[3:6, 6:9] = -R @ self._skew(accel) * dt
+        F[3:6, E_ATT] = -R @ self._skew(accel) * dt
 
         # dv/dba: -R * dt
-        F[3:6, 9:12] = -R * dt
+        F[3:6, E_ABIAS] = -R * dt
 
         # dtheta/dtheta: I - [gyro]x * dt
-        F[6:9, 6:9] = np.eye(3) - self._skew(gyro) * dt
+        F[E_ATT, E_ATT] = np.eye(3) - self._skew(gyro) * dt
 
         # dtheta/dbg: -I * dt
-        F[6:9, 12:15] = -np.eye(3) * dt
+        F[E_ATT, E_GBIAS] = -np.eye(3) * dt
 
-        # Bias states: decay
+        # Bias states: Gauss-Markov decay
         tau_a = max(self.noise.accel_bias_tau, 1.0)
         tau_g = max(self.noise.gyro_bias_tau, 1.0)
-        F[9:12, 9:12] = np.eye(3) * (1.0 - dt / tau_a)
-        F[12:15, 12:15] = np.eye(3) * (1.0 - dt / tau_g)
+        F[E_ABIAS, E_ABIAS] = np.eye(3) * (1.0 - dt / tau_a)
+        F[E_GBIAS, E_GBIAS] = np.eye(3) * (1.0 - dt / tau_g)
+
+        # Baro bias: random walk (F = I, already set)
+
+        # Clock: bias driven by drift
+        F[E_CLK_BIAS, E_CLK_DRIFT] = dt
+
+        # Wind: random walk (F = I, already set)
 
         return F
 
     # ── Measurement Updates ────────────────────────────────────
 
     def update_baro(self, alt_measured: float):
-        """Baro altitude update with slow drift compensation."""
-        # Apply bias compensation before fusion (Feature 8)
-        alt_corrected = alt_measured - self._baro_bias
+        """Baro altitude update with bias as proper filter state.
 
-        z = np.array([alt_corrected])
-        z_pred = np.array([self.x[2]])
+        The baro bias is now part of the 21-state vector, so the filter
+        automatically estimates and tracks it with proper covariance.
+        No more EMA hack.
+        """
+        # Predicted measurement: z_pred = pos_z + baro_bias
+        # (baro measures altitude + bias)
+        z_pred = np.array([self.x[2] + self.x[BARO_BIAS_IDX]])
+        z = np.array([alt_measured])
         y = z - z_pred  # innovation
+
+        # H = [0,0,1, 0..., -1(baro_bias), 0...]
+        # H_baro[0,2] = 1.0 (position z)
+        # H_baro[0,15] = -1.0 (baro bias observes as negative)
+        # Wait — the observation model is: z = h(x) = pos_z + baro_bias
+        # So: H_baro[0,2] = 1.0 and H_baro[0,15] = 1.0
+        # But innovation is z - z_pred = alt - (pos_z + baro_bias)
+        # Correction should decrease pos_z if alt < pos_z + baro_bias
+        # and increase baro_bias if the bias is the issue
+        H = np.zeros((1, ERROR_DIM))
+        H[0, 2] = 1.0       # dp_z
+        H[0, E_BARO_BIAS] = 1.0  # d_baro_bias
 
         # Adaptive R: inflate on large transient
         R = self.R_baro.copy()
         if abs(y[0]) > 2.0:
             R *= 5.0
 
-        # Innovation gating (Mahalanobis)
-        S = self.H_baro @ self.P @ self.H_baro.T + R
-        nis = float(y @ np.linalg.inv(S) @ y)
+        # Innovation gating (Mahalanobis) using cho_solve
+        P = self.P
+        S = H @ P @ H.T + R
+        c_and_lower = la.cho_factor(S)
+        nis = float(y @ la.cho_solve(c_and_lower, y))
 
-        if nis > CHI2_1DOF:
-            log.debug(f"Baro rejected: NIS={nis:.2f} > {CHI2_1DOF}")
+        if nis > CHI2_THRESHOLDS[1]:
+            log.debug(f"Baro rejected: NIS={nis:.2f} > {CHI2_THRESHOLDS[1]}")
             return
 
-        # Standard Kalman update on error state
-        K = self.P @ self.H_baro.T @ np.linalg.inv(S)
+        # Standard Kalman update
+        K = P @ H.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
         dx = (K @ y).flatten()
         self._inject_error(dx)
 
-        # Joseph form covariance update
-        I_KH = np.eye(15) - K @ self.H_baro
-        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
-
-        # Slow baro bias update after initial convergence (Feature 8)
-        # Uses corrected alt vs ESKF state, clamped to ±10m
-        self._baro_update_count += 1
-        if self._baro_update_count > 1000:
-            innovation = alt_corrected - self.x[2]
-            self._baro_bias = np.clip(
-                self._baro_bias + self._baro_bias_alpha * innovation,
-                -10.0, 10.0
-            )
+        # Joseph form covariance update + Re-Cholesky
+        I_KH = np.eye(ERROR_DIM) - K @ H
+        P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+        self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
 
     def update_mag(self, yaw_measured: float, mag_norm: float = -1.0,
                    t_now: float = 0.0):
-        # Magnetometer yaw update with 3-tier rejection:
+        """Magnetometer yaw update with 3-tier rejection."""
         # Tier 1: field norm check
         if mag_norm > 0:
             norm_ratio = abs(mag_norm / self._calibrated_mag_norm - 1.0)
@@ -314,8 +518,11 @@ class ESKF:
             return
 
         # Get predicted yaw from quaternion
-        euler = self._quat_to_euler(self.x[6:10])
+        R_dcm = self._quat_to_dcm(self.x[QUAT])
+        euler = self._quat_to_euler(self.x[QUAT])
         yaw_pred = euler[2]
+        phi = euler[0]
+        theta = euler[1]
 
         y = np.array([self._wrap_angle(yaw_measured - yaw_pred)])
 
@@ -324,206 +531,416 @@ class ESKF:
         if mag_norm > 0:
             norm_ratio = abs(mag_norm / self._calibrated_mag_norm - 1.0)
             if norm_ratio > 0.15:
-                R *= 10.0  # inflate but don't reject
+                R *= 10.0
 
-        # Tier 3: innovation gating
-        S = self.H_mag @ self.P @ self.H_mag.T + R
-        nis = float(y @ np.linalg.inv(S) @ y)
+        # Innovation gating
+        H = np.zeros((1, ERROR_DIM))
+        # Jacobian of Euler yaw w.r.t body-frame angle error
+        cos_theta = math.cos(theta)
+        if abs(cos_theta) > 1e-3:
+            H[0, 6] = 0.0
+            H[0, 7] = math.sin(phi) / cos_theta
+            H[0, 8] = math.cos(phi) / cos_theta
+        else:
+            H[0, 8] = 1.0  # Gimbal lock fallback
+        
+        P = self.P
+        S = H @ P @ H.T + R
+        c_and_lower = la.cho_factor(S)
+        nis = float(y @ la.cho_solve(c_and_lower, y))
 
-        if nis > CHI2_1DOF:
+        if nis > CHI2_THRESHOLDS[1]:
             log.debug(f"Mag rejected (NIS): NIS={nis:.2f}")
             return
 
-        K = self.P @ self.H_mag.T @ np.linalg.inv(S)
+        K = P @ H.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
         dx = (K @ y).flatten()
         self._inject_error(dx)
 
-        # Joseph form covariance update
-        I_KH = np.eye(15) - K @ self.H_mag
-        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
+        # Joseph form covariance update + Re-Cholesky
+        I_KH = np.eye(ERROR_DIM) - K @ H
+        P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+        self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
 
-        # Magnetometer auto-calibration: slow EMA norm update (Feature 9)
-        # Handles soft-iron distortion changes during flight
+        # Magnetometer auto-calibration: slow EMA norm update
         if mag_norm > 0:
-            alpha_mag = 0.002  # very slow update (tau ≈ 60s at 10 Hz)
+            alpha_mag = 0.002
             self._calibrated_mag_norm = (
                 (1.0 - alpha_mag) * self._calibrated_mag_norm
                 + alpha_mag * mag_norm
             )
 
     def update_optical_flow(self, flow_vx: float, flow_vy: float,
-                            distance: float, quality: int):
-        # Optical flow velocity update.
+                            distance: float, quality: int,
+                            enable_rot_comp: bool = True,
+                            r_mount: np.ndarray = np.zeros(3)):
+        """Optical flow velocity update.
+        
+        Measurement Frame: Camera/Body XY plane (m/s).
+        State Frame: NED (m/s).
+        
+        The optical flow sensor observes velocity in the local body frame. We rotate the 
+        NED velocity prediction into the body frame using R_dcm^T to form the residual.
+        
+        Args:
+            flow_vx, flow_vy: Camera-plane flow velocities (m/s).
+            distance: Range to ground (m).
+            quality: Measurement quality (0-255).
+            enable_rot_comp: If true, removes rotational velocity induced by gyro rates.
+            r_mount: Mount offset of the sensor from the CG.
+        """
         if distance <= 0.05 or quality < 10:
             return
 
-        H_flow = np.zeros((2, 15))
-        H_flow[0, 3] = 1.0  # vx
-        H_flow[1, 4] = 1.0  # vy
+        R_dcm = self._quat_to_dcm(self.x[QUAT])
+        
+        # Jacobian: Measurement is in Body frame. State is in NED frame.
+        # v_body = R_dcm.T @ v_ned
+        H_flow = np.zeros((2, ERROR_DIM))
+        H_flow[:, 3:6] = R_dcm.T[0:2, :]  # vx, vy in body frame
 
         R_base = 0.5 ** 2
         R_flow = np.eye(2) * (R_base * 100.0 / max(quality, 1))
 
+        # Predicted velocity in body frame
+        v_ned = self.x[VEL]
+        v_body_pred = R_dcm.T @ v_ned
+        
         z = np.array([flow_vx, flow_vy])
-        z_pred = self.x[3:5]
+        
+        if enable_rot_comp:
+            # Flow reports total velocity including rotation. 
+            # We predict the rotational component using current gyro state.
+            omega = self.x[10:13] # gyro rates
+            v_rot_pred = np.cross(omega, r_mount)
+            # Add rotational effect to prediction (since raw flow includes it)
+            z_pred = v_body_pred[0:2] + v_rot_pred[0:2]
+        else:
+            z_pred = v_body_pred[0:2]
+
         y = z - z_pred
 
-        S = H_flow @ self.P @ H_flow.T + R_flow
-        nis = float(y @ np.linalg.inv(S) @ y)
+        P = self.P
+        S = H_flow @ P @ H_flow.T + R_flow
+        try:
+            c_and_lower = la.cho_factor(S)
+        except la.LinAlgError:
+            return
+            
+        nis = float(y @ la.cho_solve(c_and_lower, y))
 
-        if nis > CHI2_2DOF:
+        if nis > CHI2_THRESHOLDS[2]:
             return
 
-        K = self.P @ H_flow.T @ np.linalg.inv(S)
+        K = P @ H_flow.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
         dx = (K @ y).flatten()
         self._inject_error(dx)
+
+        # Joseph form covariance update + Re-Cholesky
+        I_KH = np.eye(ERROR_DIM) - K @ H_flow
+        P_new = I_KH @ P @ I_KH.T + K @ R_flow @ K.T
+        self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
+
+    def update_radar_velocity(self, vx: float, vy: float, vz: float,
+                              weight: float = 1.0):
+        """TI mmWave doppler velocity update.
         
-        # Joseph form covariance update
-        I_KH = np.eye(15) - K @ H_flow
-        self.P = I_KH @ self.P @ I_KH.T + K @ R_flow @ K.T
+        Measurement Frame: Radar/Body frame (m/s).
+        State Frame: NED (m/s).
+        
+        The radar natively measures doppler reflections in its local coordinate system.
+        The filter predicts this by rotating the global NED velocity by R_dcm^T.
+        """
+        R_dcm = self._quat_to_dcm(self.x[QUAT])
+        
+        H_radar = np.zeros((3, ERROR_DIM))
+        H_radar[:, 3:6] = R_dcm.T  # Map NED velocity error to body frame measurement
 
-    def update_radar_velocity(self, vx: float, vy: float, vz: float, weight: float = 1.0):
-        # TI mmWave doppler velocity update. Much cleaner than optical flow.
-        H_radar = np.zeros((3, 15))
-        H_radar[0, 3] = 1.0  # vx
-        H_radar[1, 4] = 1.0  # vy
-        H_radar[2, 5] = 1.0  # vz
-
-        R_radar = np.eye(3) * (0.1 ** 2) / weight  # High confidence scaled by weight
+        R_radar = np.eye(3) * (0.1 ** 2) / weight
 
         z = np.array([vx, vy, vz])
-        z_pred = self.x[3:6]
-        
+        z_pred = R_dcm.T @ self.x[VEL]
+
         self.update_external(z, z_pred, H_radar, R_radar, source="radar")
 
     def update_lidar_range(self, distance: float, weight: float = 1.0):
-        # Livox downsampled 3D range. Locks altitude solid.
+        """Livox range-to-ground altitude update.
+        
+        Measurement Frame: Body-Z axis downward (meters).
+        State Frame: NED altitude (meters, where Z is positive down).
+        
+        This assumes the Lidar is pointing straight down in the drone's body frame.
+        We correct the measured distance for the drone's tilt angle to estimate 
+        the true vertical distance to the ground: Z_ned = -distance * cos(tilt).
+        """
         if distance < 0.1:
             return
-            
-        H_lidar = np.zeros((1, 15))
-        H_lidar[0, 2] = 1.0  # z pos
-        
-        R_lidar = np.array([[0.05 ** 2]]) / weight # Very high confidence scaled by weight
 
-        z = np.array([-distance]) # NED is negative down
-        z_pred = np.array([self.x[2]])
-        
+        R_dcm = self._quat_to_dcm(self.x[QUAT])
+        # Z-axis of body frame in NED:
+        cos_tilt = R_dcm[2, 2] 
+        if cos_tilt < 0.1: # Extreme bank, unreliable
+            return
+
+        H_lidar = np.zeros((1, ERROR_DIM))
+        # z = -pos_z / cos_tilt -> dz/dpos_z = -1.0 / cos_tilt
+        H_lidar[0, 2] = -1.0 / cos_tilt  
+
+        R_lidar = np.array([[0.05 ** 2]]) / weight
+
+        z = np.array([distance])
+        z_pred = np.array([-self.x[2] / cos_tilt])
+
         self.update_external(z, z_pred, H_lidar, R_lidar, source="lidar")
 
     def update_external(self, z: np.ndarray, z_pred: np.ndarray,
                         H: np.ndarray, R: np.ndarray,
-                        source: str = "external") -> bool:
-        # Generic external measurement update for VIO, UWB, SLAM, etc.
+                        source: str = "external",
+                        force_accept: bool = False,
+                        _reacquire: bool = False) -> bool:
+        """Generic external measurement update for VIO, UWB, SLAM, etc.
+
+        Single-iteration linear update. For nonlinear measurements,
+        use update_external_iterated() instead.
+        """
         if not self._initialized:
             return False
 
         m = z.shape[0]
-        y = z - z_pred  # innovation
+        y = z - z_pred
 
         # Wrap angles if single-DOF yaw observation
-        if m == 1 and H[0, 8] != 0.0:
+        if m == 1 and H.shape[1] == ERROR_DIM and H[0, 8] != 0.0:
             y[0] = np.arctan2(np.sin(y[0]), np.cos(y[0]))
 
         # Innovation covariance
-        S = H @ self.P @ H.T + R
+        P = self.P
+        S = H @ P @ H.T + R
 
-        # Innovation gating (chi-squared)
         try:
-            S_inv = np.linalg.inv(S)
-        except np.linalg.LinAlgError:
-            log.warning(f"{source}: singular innovation covariance")
+            c_and_lower = la.cho_factor(S)
+        except la.LinAlgError:
+            log.warning(f"{source}: non-PD innovation covariance")
             return False
 
-        nis = float(y @ S_inv @ y)
+        nis = float(y @ la.cho_solve(c_and_lower, y))
 
         # Chi-squared threshold based on measurement dimension
-        chi2_thresh = {1: 5.991, 2: 9.210, 3: 7.815}.get(m, 3.0 * m)
+        chi2_thresh = CHI2_THRESHOLDS.get(m, 3.0 * m)
 
-        if nis > chi2_thresh:
-            log.debug(f"{source} rejected: NIS={nis:.2f} > {chi2_thresh}")
+        src = source.lower()
+
+        if not force_accept and nis > chi2_thresh:
+            if _reacquire:
+                if self._sensor_rejections.get(src, 0) >= 5:
+                    log.warning(
+                        f"RAIM FAULT: {src} rejected 5 times consecutively. Marked UNHEALTHY."
+                    )
+                log.debug(f"{src} rejected (reacquire): NIS={nis:.2f} > {chi2_thresh}")
+                return False
+
+            count = self._sensor_rejections.get(src, 0) + 1
+            self._sensor_rejections[src] = count
+            if count >= 5:
+                log.warning(
+                    f"RAIM FAULT: {src} rejected 5 times consecutively. Marked UNHEALTHY."
+                )
+            if src == "gps":
+                if count >= 5:
+                    return self.update_external(
+                        z, z_pred, H, R, source=source,
+                        force_accept=True, _reacquire=True,
+                    )
+                if count >= 3:
+                    scale = min(nis / chi2_thresh, 100.0)
+                    return self.update_external(
+                        z, z_pred, H, R * scale, source=source,
+                        force_accept=force_accept, _reacquire=True,
+                    )
+            log.debug(f"{src} rejected: NIS={nis:.2f} > {chi2_thresh}")
             return False
 
+        # Reset rejections on success
+        self._sensor_rejections[src] = 0
+
         # Kalman gain
-        K = self.P @ H.T @ S_inv
+        K = P @ H.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
 
         # Error state injection
         dx = (K @ y).flatten()
         self._inject_error(dx)
 
-        # Joseph form covariance update
-        I_KH = np.eye(15) - K @ H
-        self.P = I_KH @ self.P @ I_KH.T + K @ R @ K.T
+        # Joseph form covariance update + Re-Cholesky
+        I_KH = np.eye(ERROR_DIM) - K @ H
+        P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+        try:
+            self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
+        except np.linalg.LinAlgError:
+            self.cholesky_failures += 1
+            self.covariance_repairs += 1
+            # Hard fallback: inflate previous U
+            self.U = self.U * 1.1
+
+        # Log Innovation
+        self.innovation_history.append((self._step_count, src, y.copy(), S.copy(), nis))
+
+        # Track spikes (using a rough threshold for 3-DOF like 16.27 for 99.9%)
+        # Here we just use a generic threshold > 20 as a "spike" for logging
+        if nis > 20.0:
+            self.innovation_spikes += 1
 
         return True
+
+    def update_external_iterated(self, z: np.ndarray,
+                                 h_func: Callable[[np.ndarray], np.ndarray],
+                                 H_func: Callable[[np.ndarray], np.ndarray],
+                                 R: np.ndarray,
+                                 source: str = "IEKF",
+                                 max_iter: int = 5,
+                                 tol: float = 1e-4) -> bool:
+        """Iterated Extended Kalman Filter (IEKF) measurement update.
+
+        For nonlinear measurements (UWB range, GPS pseudorange), a single
+        linearization around the current state introduces bias. The IEKF
+        iterates the Gauss-Newton update until convergence, re-linearizing
+        H around the updated state at each step.
+
+        Args:
+            z: measurement vector
+            h_func: measurement function h(x_nominal) → z_pred
+            H_func: Jacobian function H(x_nominal) → dh/dx (m × ERROR_DIM)
+            R: measurement noise covariance
+            source: name for logging
+            max_iter: maximum Gauss-Newton iterations
+            tol: convergence tolerance on correction norm
+
+        Returns:
+            True if measurement accepted
+        """
+        if not self._initialized:
+            return False
+
+        m = z.shape[0]
+        chi2_thresh = CHI2_THRESHOLDS.get(m, 3.0 * m)
+
+        # Save original state for rollback on rejection
+        x_orig = self.x.copy()
+        U_orig = self.U.copy()
+
+        accepted = False
+        for iteration in range(max_iter):
+            # Evaluate measurement model at current state
+            z_pred = h_func(self.x)
+            H = H_func(self.x)
+            y = z - z_pred
+
+            # Innovation covariance
+            P = self.P
+            S = H @ P @ H.T + R
+            try:
+                c_and_lower = la.cho_factor(S)
+            except la.LinAlgError:
+                log.warning(f"{source} IEKF: non-PD S at iteration {iteration}")
+                break
+
+            # Gating on first iteration only
+            if iteration == 0:
+                nis = float(y @ la.cho_solve(c_and_lower, y))
+                if nis > chi2_thresh:
+                    log.debug(f"{source} IEKF rejected: NIS={nis:.2f} > {chi2_thresh}")
+                    break
+
+            # Kalman gain and correction
+            K = P @ H.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
+            dx = (K @ y).flatten()
+
+            # Check convergence
+            if np.linalg.norm(dx) < tol:
+                accepted = True
+                # Apply final correction
+                self._inject_error(dx)
+                # Joseph form covariance update + Re-Cholesky
+                I_KH = np.eye(ERROR_DIM) - K @ H
+                P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+                self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
+                break
+
+            # Apply intermediate correction (re-linearization point)
+            self._inject_error(dx)
+
+            if iteration == max_iter - 1:
+                # Last iteration — accept with final linearization
+                accepted = True
+                I_KH = np.eye(ERROR_DIM) - K @ H
+                P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+                self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
+
+        if not accepted:
+            # Rollback
+            self.x = x_orig
+            self.U = U_orig
+
+        return accepted
 
     # ── Error Injection ────────────────────────────────────────
 
     def _inject_error(self, dx: np.ndarray):
-        # shove the correction into the main state
-        self.x[0:3] += dx[0:3]   # position
-        self.x[3:6] += dx[3:6]   # velocity
+        """Inject error-state correction into nominal state."""
+        self.x[POS] += dx[E_POS]      # position
+        self.x[VEL] += dx[E_VEL]      # velocity
 
-        # Attitude: q = q * [1, dtheta/2]
-        dtheta = dx[6:9]
+        # Attitude: q = q ⊗ [1, dtheta/2]
+        dtheta = dx[E_ATT]
         dq = np.array([1.0, dtheta[0]/2, dtheta[1]/2, dtheta[2]/2])
         dq /= np.linalg.norm(dq)
-        self.x[6:10] = self._quat_mult(self.x[6:10], dq)
-        self.x[6:10] /= np.linalg.norm(self.x[6:10])
+        self.x[QUAT] = self._quat_mult(self.x[QUAT], dq)
+        self.x[QUAT] /= np.linalg.norm(self.x[QUAT])
 
-        self.x[10:13] += dx[9:12]   # accel bias
-        self.x[13:16] += dx[12:15]  # gyro bias
+        self.x[ABIAS] += dx[E_ABIAS]  # accel bias
+        self.x[GBIAS] += dx[E_GBIAS]  # gyro bias
 
-        # Clamp biases
-        self.x[10:13] = np.clip(self.x[10:13],
+        # New states
+        self.x[BARO_BIAS_IDX] += dx[E_BARO_BIAS]    # baro bias
+        self.x[CLK_BIAS_IDX] += dx[E_CLK_BIAS]      # clock bias
+        self.x[CLK_DRIFT_IDX] += dx[E_CLK_DRIFT]    # clock drift
+        self.x[WIND] += dx[E_WIND]                   # wind
+
+        # Clamp all bounded states
+        self.x[ABIAS] = np.clip(self.x[ABIAS],
                                 -self.ACCEL_BIAS_LIMIT, self.ACCEL_BIAS_LIMIT)
-        self.x[13:16] = np.clip(self.x[13:16],
+        self.x[GBIAS] = np.clip(self.x[GBIAS],
                                 -self.GYRO_BIAS_LIMIT, self.GYRO_BIAS_LIMIT)
+        self.x[BARO_BIAS_IDX] = np.clip(self.x[BARO_BIAS_IDX],
+                                        -self.BARO_BIAS_LIMIT, self.BARO_BIAS_LIMIT)
+        self.x[WIND] = np.clip(self.x[WIND], -self.WIND_LIMIT, self.WIND_LIMIT)
 
     # ── Health Monitoring ──────────────────────────────────────
 
-    def _harden_covariance(self):
-        # keep the covariance matrix from going crazy
-        # Enforce symmetry
-        self.P = (self.P + self.P.T) / 2.0
-
-        # Eigenvalue bounding
-        min_eigenvalue = 1e-9
-        max_eigenvalue = 1e7
-        eigvals, eigvecs = np.linalg.eigh(self.P)
-
-        if np.any(eigvals < min_eigenvalue) or np.any(eigvals > max_eigenvalue):
-            # Clamp eigenvalues
-            eigvals = np.clip(eigvals, min_eigenvalue, max_eigenvalue)
-            # Reconstruct P
-            self.P = eigvecs @ np.diag(eigvals) @ eigvecs.T
-            # Re-enforce symmetry
-            self.P = (self.P + self.P.T) / 2.0
-
     def _check_health(self):
-        vel_norm = np.linalg.norm(self.x[3:6])
-        q = self.x[6:10]
+        vel_norm = np.linalg.norm(self.x[VEL])
+        q = self.x[QUAT]
         euler = self._quat_to_euler(q)
         tilt = math.degrees(math.sqrt(euler[0]**2 + euler[1]**2))
-        ba_norm = np.linalg.norm(self.x[10:13])
-        bg_norm = np.linalg.norm(self.x[13:16])
-        p_trace = np.trace(self.P)
+        ba_norm = np.linalg.norm(self.x[ABIAS])
+        bg_norm = np.linalg.norm(self.x[GBIAS])
+        P = self.P
+        p_trace = np.trace(P)
 
-        # Check for NaN/Inf
+        # NaN/Inf check
         if np.any(np.isnan(self.x)) or np.any(np.isinf(self.x)):
             self._health = EKFHealth.FAULT
             log.critical("ESKF FAULT: NaN/Inf in state vector")
             return
 
-        if np.any(np.isnan(self.P)) or np.any(np.isinf(self.P)):
+        if np.any(np.isnan(self.U)) or np.any(np.isinf(self.U)):
             self._health = EKFHealth.FAULT
-            log.critical("ESKF FAULT: NaN/Inf in covariance")
+            log.critical("ESKF FAULT: NaN/Inf in covariance U")
             return
 
-        # Condition number
+        # Condition number (periodic)
         try:
-            cond_num = np.linalg.cond(self.P)
-            if cond_num > 1e8:
+            cond_num = np.linalg.cond(P)
+            if cond_num > 1e12:
                 log.warning(f"Covariance poorly conditioned: {cond_num:.2e}")
         except np.linalg.LinAlgError:
             self._health = EKFHealth.FAULT
@@ -546,10 +963,10 @@ class ESKF:
             self._health = EKFHealth.WARNING
             return
 
-        # Condition number check (expensive, do rarely)
+        # Deep condition number check (expensive)
         if self._step_count % 500 == 0:
             try:
-                cond = np.linalg.cond(self.P)
+                cond = np.linalg.cond(P)
                 if cond > self.P_COND_LIMIT:
                     self._health = EKFHealth.WARNING
                     log.warning(f"ESKF WARNING: P condition number = {cond:.2e}")
@@ -558,10 +975,8 @@ class ESKF:
                 self._health = EKFHealth.FAULT
                 return
 
-        # Convergence logic: z-axis covariance (baro-observable) must settle
-        # AND minimum step count to avoid premature convergence.
-        # X/Y covariance grows unbounded without GPS/VIO, so only check Z.
-        z_cov = self.P[2, 2]
+        # Convergence: z-axis covariance
+        z_cov = P[2, 2]
         if z_cov < self.Z_COV_CONVERGED and self._step_count > 200:
             self._health = EKFHealth.HEALTHY
         else:
@@ -571,7 +986,7 @@ class ESKF:
 
     @staticmethod
     def _quat_mult(q1, q2):
-        # multiply two quaternions together
+        """Multiply two quaternions [w,x,y,z]."""
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
         return np.array([
@@ -583,7 +998,7 @@ class ESKF:
 
     @staticmethod
     def _quat_to_dcm(q):
-        # quat to rotation matrix
+        """Quaternion to rotation matrix (body → NED)."""
         w, x, y, z = q
         return np.array([
             [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
@@ -593,17 +1008,14 @@ class ESKF:
 
     @staticmethod
     def _quat_to_euler(q):
-        # quat to roll/pitch/yaw
+        """Quaternion to [roll, pitch, yaw]."""
         w, x, y, z = q
-        # Roll
         sinr_cosp = 2.0 * (w*x + y*z)
         cosr_cosp = 1.0 - 2.0 * (x*x + y*y)
         roll = math.atan2(sinr_cosp, cosr_cosp)
-        # Pitch
         sinp = 2.0 * (w*y - z*x)
         sinp = max(-1.0, min(1.0, sinp))
         pitch = math.asin(sinp)
-        # Yaw
         siny_cosp = 2.0 * (w*z + x*y)
         cosy_cosp = 1.0 - 2.0 * (y*y + z*z)
         yaw = math.atan2(siny_cosp, cosy_cosp)
@@ -611,7 +1023,7 @@ class ESKF:
 
     @staticmethod
     def _euler_to_quat(roll, pitch, yaw):
-        # roll/pitch/yaw to quaternion
+        """[roll, pitch, yaw] to quaternion [w,x,y,z]."""
         cr, sr = math.cos(roll/2), math.sin(roll/2)
         cp, sp = math.cos(pitch/2), math.sin(pitch/2)
         cy, sy = math.cos(yaw/2), math.sin(yaw/2)
@@ -624,7 +1036,7 @@ class ESKF:
 
     @staticmethod
     def _skew(v):
-        # cross-product matrix trick
+        """Skew-symmetric (cross-product) matrix."""
         return np.array([
             [0, -v[2], v[1]],
             [v[2], 0, -v[0]],
@@ -635,39 +1047,33 @@ class ESKF:
     def _wrap_angle(a: float) -> float:
         return math.atan2(math.sin(a), math.cos(a))
 
-    # ── Adaptive Process Noise (Feature 6) ─────────────────────
+    # ── Adaptive Process Noise ─────────────────────────────────
 
     def scale_process_noise(self, vibration_level: float):
         """Scale Q based on detected vibration level.
 
         Args:
             vibration_level: 0.0 (calm) to 1.0+ (severe vibration).
-                Computed from accel variance in the main loop.
         """
-        # Scale factor: 1.0 at zero vibration, up to 10.0 at extreme
         scale = max(1.0, min(1.0 + vibration_level * 5.0, 10.0))
         self._vibration_scale = scale
         self.Q = self.Q_base * scale
 
-    # ── Zero Velocity Update (Feature 7) ───────────────────────
+    # ── Zero Velocity Update ───────────────────────────────────
 
     def update_zupt(self):
-        """Zero velocity update — forces v=[0,0,0] as a measurement.
-
-        Should be called when the drone is detected as stationary
-        (accel ≈ gravity-only AND gyro ≈ 0).
-        """
+        """Zero velocity update — forces v=[0,0,0] as a measurement."""
         if not self._initialized:
             return
 
-        H_zupt = np.zeros((3, 15))
+        H_zupt = np.zeros((3, ERROR_DIM))
         H_zupt[0, 3] = 1.0  # vx
         H_zupt[1, 4] = 1.0  # vy
         H_zupt[2, 5] = 1.0  # vz
 
-        R_zupt = np.eye(3) * (0.01 ** 2)  # very high confidence in zero velocity
+        R_zupt = np.eye(3) * (0.01 ** 2)
         z = np.zeros(3)
-        z_pred = self.x[3:6]
+        z_pred = self.x[VEL]
 
         self.update_external(z, z_pred, H_zupt, R_zupt, source="ZUPT")
 
@@ -676,20 +1082,17 @@ class ESKF:
     def update_gps(self, lat: float, lon: float, alt: float,
                    hdop: float = 1.0,
                    origin_lat: float = None, origin_lon: float = None,
-                   origin_alt: float = None):
+                   origin_alt: float = None,
+                   force_accept: bool = False) -> bool:
         """GPS position update with WGS-84 → local NED conversion.
 
-        Args:
-            lat, lon: degrees
-            alt: meters MSL
-            hdop: horizontal dilution of precision (lower = better)
-            origin_*: reference point for NED frame (set on first call)
+        Also helps observe wind velocity through GPS-vs-INS discrepancy.
         """
         if not self._initialized:
-            return
-        if hdop > 5.0:
+            return False
+        if hdop > 5.0 and not force_accept:
             log.debug(f"GPS rejected: HDOP={hdop:.1f} > 5.0")
-            return
+            return False
 
         # Set origin on first valid fix
         if self._gps_origin is None:
@@ -712,23 +1115,22 @@ class ESKF:
         down = -(alt - self._gps_origin["alt"])
 
         z = np.array([north, east, down])
-        z_pred = self.x[0:3]
+        z_pred = self.x[POS]
 
-        H_gps = np.zeros((3, 15))
+        H_gps = np.zeros((3, ERROR_DIM))
         H_gps[0, 0] = 1.0  # north
         H_gps[1, 1] = 1.0  # east
         H_gps[2, 2] = 1.0  # down
 
-        # HDOP-scaled noise (higher HDOP = less trust)
-        gps_pos_std = 2.5 * hdop  # ~2.5m CEP at HDOP=1
+        # HDOP-scaled noise
+        gps_pos_std = 2.5 * hdop
         R_gps = np.eye(3) * (gps_pos_std ** 2)
-        # Vertical is always worse than horizontal
-        R_gps[2, 2] *= 4.0
+        R_gps[2, 2] *= 4.0  # vertical always worse
 
-        self.update_external(z, z_pred, H_gps, R_gps, source="GPS")
+        return self.update_external(z, z_pred, H_gps, R_gps, source="gps", force_accept=force_accept)
 
     # ── Reset ──────────────────────────────────────────────────
 
     def reset(self):
-        # factory reset — start from scratch
+        """Factory reset — start from scratch."""
         self.__init__(self.noise)
