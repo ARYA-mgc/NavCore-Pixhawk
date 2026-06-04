@@ -9,20 +9,20 @@
  Architecture
  ┌───────────────────────────────────────────────────────────────┐
  │  Pixhawk Cube Orange                                          │
- │   IMU (ICM-20689 / ICM-42688)  100 Hz                        │
- │   Barometer (MS5611)            10 Hz                        │
- │   Magnetometer (RM3100)         50 Hz                        │
+ │   IMU (ICM-20689 / ICM-42688)  100 Hz                         │
+ │   Barometer (MS5611)            10 Hz                         │
+ │   Magnetometer (RM3100)         50 Hz                         │
  └────────────────────────┬──────────────────────────────────────┘
                           │ UART (/dev/ttyAMA0) or USB (/dev/ttyACM0)
                           │ MAVLink 2.0
  ┌────────────────────────▼──────────────────────────────────────┐
  │  Raspberry Pi 4                                               │
- │   mavlink_bridge.py  ── raw MAVLink parser                   │
- │   imu_noise_params.py ─ sensor noise config                  │
- │   ekf_core.py        ── 9-state Extended Kalman Filter       │
- │   dead_reckon.py     ── fallback dead-reckoning              │
- │   ins_logger.py      ── CSV / live telemetry log             │
- │   main_ins_navigation.py  ◄── YOU ARE HERE                   │
+ │   mavlink_bridge.py  ── raw MAVLink parser                    │
+ │   imu_noise_params.py ─ sensor noise config                   │
+ │   ekf_core.py        ── 9-state Extended Kalman Filter        │
+ │   dead_reckon.py     ── fallback dead-reckoning               │
+ │   ins_logger.py      ── CSV / live telemetry log              │
+ │   main_ins_navigation.py  ◄── YOU ARE HERE                    │
  └───────────────────────────────────────────────────────────────┘
 """
 
