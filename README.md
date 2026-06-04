@@ -142,13 +142,13 @@ pytest tests/test_ins.py -v
 ```
 ┌─────────────────────────────────────────────────────────┐
 │           PIXHAWK CUBE ORANGE                           │
-│  IMU ICM-42688  100 Hz  ·  Baro MS5611  10 Hz          │
+│  IMU ICM-42688  100 Hz  ·  Baro MS5611  10 Hz           │
 │  Mag RM3100      50 Hz                                  │
 └──────────────────────┬──────────────────────────────────┘
                        │ MAVLink 2.0  UART 921600
                        ▼
-┌──────────────────────────────────────────────────────────┐
-│              RASPBERRY PI 4  —  mavlink_bridge.py        │
+┌─────────────────────────────────────────────────────────┐
+│              RASPBERRY PI 4  —  mavlink_bridge.py       │
 │  RAW_IMU · SCALED_PRESSURE · SCALED_IMU3                │
 └──────────┬────────────────────────────────┬─────────────┘
            │ accel, gyro                    │ baro alt / mag yaw
@@ -156,12 +156,12 @@ pytest tests/test_ins.py -v
 ┌─────────────────────────────────────────────────────────┐
 │              ekf_core.py  —  9-state EKF                │
 │                                                         │
-│  x = [px py pz  vx vy vz  φ θ ψ]                       │
+│  x = [px py pz  vx vy vz  φ θ ψ]                        │
 │                                                         │
-│  PREDICT   x̂⁻ = f(x̂, u)   [IMU mechanisation]         │
-│  PROPAGATE P⁻  = FPFᵀ + Q                              │
-│  UPDATE    K   = P⁻Hᵀ(HP⁻Hᵀ+R)⁻¹  [baro / mag]       │
-│  CORRECT   x̂  = x̂⁻ + K(z − Hx̂⁻)                      │
+│  PREDICT   x̂⁻ = f(x̂, u)   [IMU mechanisation]           │
+│  PROPAGATE P⁻  = FPFᵀ + Q                               │
+│  UPDATE    K   = P⁻Hᵀ(HP⁻Hᵀ+R)⁻¹  [baro / mag]          │
+│  CORRECT   x̂  = x̂⁻ + K(z − Hx̂⁻)                         │
 └──────────────────────────┬──────────────────────────────┘
                            │ state [pos vel euler]
               ┌────────────┼────────────────┐
