@@ -148,6 +148,8 @@ class ESKF:
         self.innovation_spikes = 0
         self.covariance_repairs = 0
 
+        # Last bias-compensated gyro measurement (body rates, rad/s)
+        self._last_gyro = np.zeros(3)
         # --- Process noise (Continuous-Time Model Q_c) ---
         # The continuous-time process model is: dx_err/dt = F * x_err + G * w
         # where w is continuous-time white noise with Power Spectral Density (PSD) Q_c.
@@ -300,6 +302,9 @@ class ESKF:
         # Bias compensation
         accel = accel_raw - self.x[ABIAS]
         gyro = gyro_raw - self.x[GBIAS]
+
+        # Cache last bias-compensated gyro for use in other updates
+        self._last_gyro = gyro.copy()
 
         # ── RK4 for position, velocity, and quaternion ──────────
         # State pack: [pos(3), vel(3), quat(4)] = 10 elements
@@ -606,12 +611,13 @@ class ESKF:
         v_ned = self.x[VEL]
         v_body_pred = R_dcm.T @ v_ned
         
+        
         z = np.array([flow_vx, flow_vy])
         
         if enable_rot_comp:
-            # Flow reports total velocity including rotation. 
-            # We predict the rotational component using current gyro state.
-            omega = self.x[10:13] # gyro rates
+            # Flow reports total velocity including rotation.
+            # Use the last bias-compensated gyro measurement (rad/s) to predict rotation.
+            omega = getattr(self, "_last_gyro", np.zeros(3))
             v_rot_pred = np.cross(omega, r_mount)
             # Add rotational effect to prediction (since raw flow includes it)
             z_pred = v_body_pred[0:2] + v_rot_pred[0:2]
