@@ -10,7 +10,6 @@ sys.path.append(str(src_dir))
 
 import time
 import signal
-import sys
 import logging
 import argparse
 import threading
@@ -36,14 +35,9 @@ from fusion.vio import VIOPipeline
 from fusion.multi_imu import MultiIMUFusion
 from fusion.gps_tight import TightGPSCoupling
 from safety.mlp import MLAnomalyDetector
-from safety.mlp import MLAnomalyDetector
 from safety.fault import FaultManager
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
-from fusion.mag_cal import MagAutoCalibrator
-from fusion.trn import TerrainRelativeNavigation, DEMTile
-from fusion.mag_cal import MagAutoCalibrator
-from fusion.trn import TerrainRelativeNavigation, DEMTile
 from fusion.mag_cal import MagAutoCalibrator
 from fusion.trn import TerrainRelativeNavigation, DEMTile
 
@@ -103,7 +97,6 @@ class INSNavSys:
         self.noise  = IMUNoiseParams()
         _initial_eskf = ESKF(self.noise)
         self.mht    = MHTManager(_initial_eskf)
-        self.eskf   = _initial_eskf
         self.dr     = DeadReckon(self.noise)
         self.logger = INSLogger("logs/ins_data.csv")
         self.s_logger = StructuredLogger("logs")
