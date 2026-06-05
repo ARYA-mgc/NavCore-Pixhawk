@@ -611,6 +611,7 @@ class ESKF:
         v_ned = self.x[VEL]
         v_body_pred = R_dcm.T @ v_ned
         
+        
         z = np.array([flow_vx, flow_vy])
         
         if enable_rot_comp:
