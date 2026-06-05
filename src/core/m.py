@@ -782,7 +782,7 @@ class INSNavSys:
 
         if not can_inject and self._vision_enabled:
             self._vision_enabled = False
-            log.error(f"Vision injection DISABLED! Health={health.name}, Safety={safety_action.name}")
+            log.error(f"Vision injection DISABLED! Health={health.name}, Safety={self.safety.last_action.name}")
             self.bridge.send_statustext("INS: Vision disabled", 4)
         elif can_inject and not self._vision_enabled:
             self._vision_enabled = True
