@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# This is where we poke the math wizard with a stick to see if it breaks.
-# Also testing if the dead reckoning actually reckons anything.
+# test_ins.py module.
+# Does exactly what you think it does.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -13,7 +13,7 @@ from utils.noise      import IMUNoiseParams
 from core.dr import DeadReckon
 
 
-# ── fixtures ────────────────────────────────────────────────────
+#  fixtures 
 @pytest.fixture
 def noise():
     return IMUNoiseParams()
@@ -31,7 +31,7 @@ def dr(noise):
     return DeadReckon(noise)
 
 
-# ── ESKF tests ──────────────────────────────────────────────────
+#  ESKF tests 
 class TestESKF:
 
     def test_initial_quaternion_identity(self, eskf):
@@ -119,7 +119,7 @@ class TestESKF:
         assert eskf.health == EKFHealth.HEALTHY
 
 
-# ── Dead Reckon tests ────────────────────────────────────────────
+#  Dead Reckon tests 
 class TestDeadReckon:
 
     def test_stationary(self, dr):
@@ -138,7 +138,7 @@ class TestDeadReckon:
         assert dr.pos[0] > 0.0
 
 
-# ── Noise Params tests ───────────────────────────────────────────
+#  Noise Params tests 
 class TestIMUNoiseParams:
 
     def test_defaults_positive(self, noise):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Did we actually fly where we thought we did? Let's check against RTK.
-# Usage: python tools/gt_eval.py --ins logs/ins_data.csv --truth rtk_log.csv
+# Ground truth evaluation.
+# Did we actually go where we think we went?
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_gps_outage.py module.
+# Does exactly what you think it does.
+
 """GPS outage and recovery tests.
 
 Default tests use 5s and 30s outages (complete in <10s each).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Let's see how fast this baby can run on a potato.
-# Basically a drag race for the ESKF code.
+# Benchmark.
+# Drag racing the ESKF on a potato CPU.
 
 import sys, os
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +14,7 @@ from core.eskf        import ESKF
 from core.dr import DeadReckon
 from utils.noise      import IMUNoiseParams
 
-# ── simulation parameters ────────────────────────────────────────
+#  simulation parameters 
 DT_LIST   = [0.02, 0.01]   # 50 Hz and 100 Hz
 DURATION  = 30.0           # seconds
 GRAVITY   = 9.80665
@@ -146,7 +146,7 @@ def run_benchmark(dt):
     elapsed = time.monotonic() - t_start
     eff_hz  = N / elapsed
 
-    # ── error analysis ─────────────────────────────────────────
+    #  error analysis 
     eskf_err  = eskf_pos - true_pos
     dr_err    = dr_pos   - true_pos
     eskf_rmse = math.sqrt(np.mean(np.sum(eskf_err**2, axis=1)))

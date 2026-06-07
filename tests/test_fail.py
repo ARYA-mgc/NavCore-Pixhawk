@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-# This is where we torture the ESKF math wizard.
-# We cut its sensors, scream at it with noise, and basically ruin its day.
-# If it survives, it's ready for flight.
-
+# test_fail.py module.
+# Does exactly what you think it does.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

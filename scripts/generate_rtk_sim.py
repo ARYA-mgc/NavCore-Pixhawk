@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# RTK Simulator.
+# Making fake data to test real math.
+
 """Generate simulated flight data with RTK ground truth.
 
 Outputs realistic sensor logs for ESKF validation:

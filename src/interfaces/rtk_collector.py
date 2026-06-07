@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# rtk_collector.py module.
+# Does exactly what you think it does.
+
 """RTK Ground Truth Collector — u-blox F9P UBX NAV-PVT / NAV-HPPOSLLH.
 
 Threaded serial reader that parses centimeter-level RTK fixes from the

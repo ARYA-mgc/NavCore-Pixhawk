@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# flight_recorder.py module.
+# Does exactly what you think it does.
+
 """Flight Data Recorder — synchronized multi-stream CSV recording.
 
 Records all sensor streams + RTK ground truth + ESKF state during flight.

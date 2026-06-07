@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
-# Emergency Landing Site Detection
-#
-# When Return-To-Home is blocked or the drone needs to land NOW,
-# this module analyzes Livox lidar point cloud data to find safe
-# flat areas within reach.
-#
-# Algorithm:
-#   1. Voxel-grid the incoming point cloud
-#   2. Fit local planes to grid cells using SVD
-#   3. Score cells by: surface roughness, area, slope, distance
-#   4. Return ranked list of landing candidates
-#
-# Integrates with RTH logic in m.py — if the home path is blocked,
-# divert to the nearest safe landing zone.
+# landing.py module.
+# Does exactly what you think it does.
 
 import logging
 import math

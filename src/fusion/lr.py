@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Spatial awareness engine.
-# Chews through Livox Mid-360 point clouds and TI mmWave doppler data so we don't hit trees.
+# Lidar & Radar fusion.
+# Actively avoiding trees since 2024.
 
 import numpy as np
 import logging
@@ -14,7 +14,7 @@ except ImportError:
 log = logging.getLogger("lidar_radar")
 
 class LidarRadarFusion:
-    # Keeps the drone out of the trees
+    # Obstacle avoidance processor
     def __init__(self, voxel_size=0.1, rdr_reject=0.05):
         self.voxel_size = voxel_size
         self.rdr_reject = rdr_reject
@@ -36,7 +36,7 @@ class LidarRadarFusion:
             downpcd = pcd.voxel_down_sample(voxel_size=self.voxel_size)
             filtered_pts = np.asarray(downpcd.points)
         else:
-            # Poor man's decimation
+            # Basic decimation
             filtered_pts = points[::10, :3]
             
         # Simplest collision check: finding the closest point

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Simultaneous Localization and... yeah you know what it means.
+# SLAM interface.
+# Simultaneous Localization and... you know the rest.
 
 import logging
 import math
@@ -75,7 +76,7 @@ def _quat_inverse(q):
 
 
 class SLAMInterface:
-    # takes SLAM poses, aligns them to NED, and feeds the filter
+    # SLAM pose processing and alignment.
 
     POS_STD = 0.10           # m — typical ORB-SLAM3
     YAW_STD = 0.05           # rad (~3 deg)
@@ -122,7 +123,7 @@ class SLAMInterface:
         return self._loop_closure_count
 
     def set_frame_transform(self, R: np.ndarray, t: np.ndarray):
-        # manually set the frame transform
+        # Set SLAM to NED coordinate transform.
         self._R_slam_to_ned = R.copy()
         self._t_slam_to_ned = t.copy()
         self._q_slam_to_ned = _rotation_to_quat(R)
@@ -131,7 +132,7 @@ class SLAMInterface:
 
     def auto_align(self, slam_pos: np.ndarray, ned_pos: np.ndarray,
                    slam_quat: np.ndarray, ned_quat: np.ndarray):
-        # figure out the transform from one matched point
+        # Compute transform from matched pose pair.
         if not self._enabled:
             return
 
@@ -179,7 +180,7 @@ class SLAMInterface:
                           orientation: np.ndarray,
                           covariance: Optional[np.ndarray] = None,
                           is_loop_closure: bool = False) -> Optional[dict]:
-        # convert a SLAM reading into something the filter understands
+        # Process incoming SLAM pose.
         if not self.is_active:
             return None
 
@@ -198,7 +199,7 @@ class SLAMInterface:
             dt = t - self._last_pose_t
             if dt > 0:
                 speed = np.linalg.norm(pos_ned - self._last_pos_ned) / dt
-                if speed > 50.0:  # > 50 m/s = clearly wrong
+                if speed > 50.0:  # > 50 m/s = Invalid velocity
                     self._rejected_count += 1
                     log.warning(f"SLAM pose rejected: speed={speed:.1f} m/s")
                     return None

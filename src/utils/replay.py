@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Time travel. Replaying old flights to see why we crashed.
+# replay.py module.
+# Does exactly what you think it does.
 
 import json
 import sys

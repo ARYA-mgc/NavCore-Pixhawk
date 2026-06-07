@@ -1,28 +1,30 @@
 /**
  * @file eskf_core.hpp
- * @brief 16-state Error-State Kalman Filter (ESKF) — C++ port.
+ * @brief 21-state ESKF C++ header.
  *
  * Full port of Python eskf.py to standalone C++17 + Eigen3.
- * No ROS2 dependency. Designed for Raspberry Pi / ARM deployment.
- * Supports SCHED_FIFO real-time scheduling on Linux.
+ * Standalone dependency-free implementation.
+ * Runs on Raspberry Pi / ARM. Supports SCHED_FIFO real-time scheduling
+ * Designed for hard real-time execution.
  *
- * Nominal state (21):
- *   x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z,
- *        baro_bias, clk_bias, clk_drift, wind_n, wind_e]
+ * 
  *
- * Error state (20):
- *   dx = [dp(3), dv(3), dtheta(3), dba(3), dbg(3), d_baro_bias, d_clk_bias, d_clk_drift, d_wind(2)]
+ * State layout (same as Python version):
+ *   Nominal (21): [pos(3), vel(3), quat(4), accel_bias(3), gyro_bias(3),
+ *                  baro_bias, clk_bias, clk_drift, wind_n, wind_e]
+ *   Error (20):   [dp(3), dv(3), dtheta(3), dba(3), dbg(3),
+ *                  d_baro, d_clk, d_clk_drift, d_wind(2)]
  *
  * Features:
- *   - Covariance-based convergence (z_cov < 0.25 + step > 200)
- *   - Adaptive process noise scaling
- *   - Zero velocity update (ZUPT)
- *   - Barometric drift compensation
- *   - Magnetometer auto-calibration
- *   - GPS fusion (WGS-84 → NED)
- *   - Generic external measurement update
- *   - Lidar range + radar velocity updates
- *   - Optical flow velocity update
+ *   - Covariance convergence detection (z_cov < 0.25 + step > 200)
+ *   - Adaptive process noise (scales with vibration magnitude)
+ *   - ZUPT (zero velocity update)
+ *   - Baro drift compensation (bias estimation)
+ *   - Mag auto-cal (magnetic distortion rejection)
+ *   - GPS fusion (WGS-84 to NED local tangent plane)
+ *   - Generic external measurements (modular update framework)
+ *   - Lidar range + radar velocity (high-bandwidth relative updates)
+ *   - Optical flow (GNSS-denied velocity tracking)
  */
 
 #pragma once
@@ -35,18 +37,18 @@
 
 namespace navcore {
 
-// ── Constants ────────────────────────────────────────────────
+// ── Constants (Constants) ──────────────────────
 
 constexpr int STATE_DIM = 21;
 constexpr int ERROR_DIM = 20;
-constexpr double GRAVITY = 9.80665;
-constexpr double CHI2_1DOF = 5.991;
-constexpr double CHI2_2DOF = 9.210;
-constexpr double CHI2_3DOF = 7.815;
-constexpr double R_EARTH = 6371000.0;
-constexpr double Z_COV_CONVERGED = 1.5;
+constexpr double GRAVITY = 9.80665; // Standard gravity
+constexpr double CHI2_1DOF = 3.841;   // 1-DOF chi-squared threshold
+constexpr double CHI2_2DOF = 5.991;   // 2-DOF gate
+constexpr double CHI2_3DOF = 7.815;   // 3-DOF gate
+constexpr double R_EARTH = 6371000.0; // Earth radius approximation
+constexpr double Z_COV_CONVERGED = 1.5; // Convergence threshold
 
-// ── Type Aliases ─────────────────────────────────────────────
+// ── Type Aliases (Type Aliases) ──
 
 using Vec3    = Eigen::Vector3d;
 using Vec4    = Eigen::Vector4d;

@@ -1,5 +1,8 @@
+# debug_health.py module.
+# Does exactly what you think it does.
+
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 import numpy as np
 from core.eskf import ESKF
 from utils.noise import IMUNoiseParams

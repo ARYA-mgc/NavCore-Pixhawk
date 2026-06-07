@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Three IMUs are better than one. If they disagree, someone's lying.
-# Cube Orange: ICM-42688-P (primary), ICM-20948, ICM-20649
+# Multi-IMU voting.
+# When three sensors disagree, this finds the liar.
 
 import numpy as np
 import logging

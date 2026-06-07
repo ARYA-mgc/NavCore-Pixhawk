@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-# Sliding Window Marginalization
-#
-# This is VINS-Mono / OKVIS level stuff. If you implement this,
-# you're competing with top-tier academic visual-inertial systems.
-#
-# Instead of fusing all measurements into a single fixed-size state,
-# we maintain a sliding window of recent keyframe poses. When the
-# window overflows, we marginalize (remove) the oldest keyframe
-# by converting its information into a prior on the remaining states
-# using the Schur complement.
-#
-# This preserves temporal correlations that a standard EKF discards,
-# giving significantly better accuracy for VIO/SLAM fusion.
-#
-# Architecture:
-#   - Window of K keyframe poses (position + quaternion)
-#   - IMU preintegration between keyframes
-#   - Visual/SLAM observations tie keyframes together
-#   - Marginalization via Schur complement when window is full
+# Sliding Window Marginalization.
+# Fancy memory management for past poses.
 
 import logging
 import math

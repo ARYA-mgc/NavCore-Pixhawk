@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Talking to ROS2 because someone decided we need more middleware.
+# ROS2 interface.
+# Because someone said we needed more middleware.
 
 import logging
 import numpy as np
@@ -26,7 +27,7 @@ except ImportError:
 
 
 class INSRos2Publisher:
-    # broadcast our state to the ROS2 world (if anyone's listening)
+    # Publish ESKF state to ROS2.
 
     def __init__(self, node_name: str = "navcore_ins",
                  odom_topic: str = "/ins/odom",
@@ -65,7 +66,7 @@ class INSRos2Publisher:
             self._active = False
 
     def publish_odom(self, state: dict, covariance: np.ndarray):
-        # package up our state as a ROS odometry msg
+        # Format and publish Odometry message.
         if not self._active:
             return
 
@@ -107,7 +108,7 @@ class INSRos2Publisher:
 
     def publish_imu(self, accel: np.ndarray, gyro: np.ndarray,
                     quat: np.ndarray):
-        # forward raw IMU to any ROS node that wants it
+        # Format and publish IMU message.
         if not self._active:
             return
 
@@ -129,7 +130,7 @@ class INSRos2Publisher:
         self._imu_pub.publish(msg)
 
     def publish_health(self, health_json: str):
-        # broadcast our health as a string
+        # Format and publish health status.
         if not self._active:
             return
 
@@ -138,7 +139,7 @@ class INSRos2Publisher:
         self._health_pub.publish(msg)
 
     def shutdown(self):
-        # shut down gracefully, don't just yank the cable
+        # Shutdown ROS2 node gracefully.
         if self._active and self._node:
             self._node.destroy_node()
             log.info("ROS2 node destroyed")

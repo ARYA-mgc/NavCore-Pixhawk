@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_endurance.py module.
+# Does exactly what you think it does.
+
 """Memory leak / endurance tests.
 
 For Raspberry Pi systems — verify:

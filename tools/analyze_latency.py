@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Latency analyzer.
+# Hunting down microseconds.
+
 """
 analyze_latency.py
 Analyzes MAVLink logs (.tlog) to statistically measure the temporal latency 

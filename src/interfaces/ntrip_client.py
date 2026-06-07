@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ntrip_client.py module.
+# Does exactly what you think it does.
+
 """NTRIP Client — relay RTCM3 corrections to u-blox F9P.
 
 Connects to an NTRIP caster (e.g., RTK2go.com), receives RTCM3

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Pytest fixtures.
+# Test configuration boilerplate.
+
 """Shared fixtures and markers for the NavCore test suite."""
 
 import pytest

@@ -1,4 +1,5 @@
-# Writing JSON logs for the fancy dashboards.
+# JSONL logger.
+# Structured data for those fancy Grafana dashboards.
 
 import os
 import json
@@ -10,7 +11,7 @@ log = logging.getLogger("structured_logger")
 
 
 class NumpyEncoder(json.JSONEncoder):
-    # teach json how to handle numpy arrays
+    # Numpy JSON encoder.
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -38,7 +39,7 @@ class StructuredLogger:
 
     def log_state(self, t: float, state: dict, covariance: np.ndarray, 
                   health_status: str, safety_action: str, timing_ms: float):
-        # write everything the filter knows to the log
+        # Log complete ESKF state.
         if self._file is None:
             return
             
@@ -66,7 +67,7 @@ class StructuredLogger:
 
     def log_innovation(self, t: float, sensor: str, nis: float, 
                        y: np.ndarray, S: np.ndarray, rejected: bool):
-        # log the innovation stats for nerds who want to tune later
+        # Log filter innovation statistics.
         if self._file is None:
             return
             

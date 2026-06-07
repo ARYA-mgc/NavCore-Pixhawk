@@ -1,4 +1,5 @@
-# Clocks drifting? Not on my watch.
+# sync.py module.
+# Does exactly what you think it does.
 
 import time
 import logging

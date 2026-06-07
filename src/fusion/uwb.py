@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Radio beacons beep-booping to give us position. Kinda like GPS but indoors and way more annoying to set up.
+# UWB fusion.
+# Like GPS, but indoors and needs more batteries.
 
 import logging
 import math

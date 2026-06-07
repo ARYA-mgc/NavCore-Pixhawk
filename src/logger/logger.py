@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Writing numbers to CSV really, really fast.
+# High-speed CSV logger.
+# Writing to disk as fast as physically possible.
 
 import csv
 import os
@@ -12,7 +13,7 @@ log = logging.getLogger("ins_logger")
 
 
 class INSLogger:
-    # dumps state to CSV — one row per timestep, simple and fast
+    # Writes state to CSV.
 
     HEADER = [
         "time_s",

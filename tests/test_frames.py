@@ -1,3 +1,6 @@
+# test_frames.py module.
+# Does exactly what you think it does.
+
 import numpy as np
 import pytest
 import math

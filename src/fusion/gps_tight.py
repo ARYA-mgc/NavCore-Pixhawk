@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# Tight GPS/INS coupling — pseudorange-level fusion.
-# Uses raw UBX RXM-RAWX from u-blox F9P via direct UART.
-# This is aerospace-grade stuff. Most open-source projects don't even attempt this.
+# Tight GNSS coupling.
+# Because loose coupling is for amateurs.
 
 import math
 import struct

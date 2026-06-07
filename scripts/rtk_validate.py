@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# RTK Validator.
+# Making sure the filter matches reality.
+
 """RTK Ground Truth Flight Validation.
 
 Replays simulated (or real) sensor data through the ESKF, compares
@@ -198,7 +201,7 @@ def print_report(errors, duration):
     print(f"  Convergence time  : {conv_t:.1f}s" if conv_t else
           "  Convergence time  : NEVER")
     print()
-    print("  ── Overall (full flight) ─────────────")
+    print("   Overall (full flight) ")
     print(f"  3D RMSE           : {np.sqrt(np.mean(e3d**2)):.4f} m")
     print(f"  3D Mean           : {np.mean(e3d):.4f} m")
     print(f"  3D Max            : {np.max(e3d):.4f} m")
@@ -206,7 +209,7 @@ def print_report(errors, duration):
     print(f"  Vertical RMSE     : {np.sqrt(np.mean(ev**2)):.4f} m")
     print()
     if conv_t is not None and len(e3d_conv) > 0:
-        print("  ── After convergence ─────────────────")
+        print("   After convergence ")
         print(f"  3D RMSE           : {np.sqrt(np.mean(e3d_conv**2)):.4f} m")
         print(f"  3D Mean           : {np.mean(e3d_conv):.4f} m")
         print(f"  3D Max            : {np.max(e3d_conv):.4f} m")

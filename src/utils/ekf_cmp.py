@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Our ESKF vs ArduPilot's EKF3. Spoiler: ours is better.
+# ekf_cmp.py module.
+# Does exactly what you think it does.
 
 import csv
 import json

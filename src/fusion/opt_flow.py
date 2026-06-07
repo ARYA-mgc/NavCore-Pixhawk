@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Looking at the ground to figure out how fast we're moving. Literally just staring at dirt.
+# Optical flow.
+# Staring at the ground to figure out how fast we're going.
 
 import math
 import numpy as np

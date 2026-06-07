@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Taking our math guesses and ArduPilot's guesses and tossing them in a blender.
+# State blender.
+# Smoothly mixing our math with ArduPilot's math.
 
 import logging
 import math

@@ -1,14 +1,12 @@
 /**
  * @file eskf_core.cpp
- * @brief 16-state ESKF — complete C++17 + Eigen3 implementation.
+ * @brief C++ implementation of the ESKF.
  *
- * Full port of Python eskf.py with all features:
- * - Covariance-based convergence
- * - Adaptive process noise
- * - ZUPT, GPS, lidar, radar, optical flow
- * - Baro drift compensation
- * - Mag auto-calibration
- * - Generic external measurement update
+ * Ported from Python for performance.
+ *
+ * Everything the Python version does, this does too:
+ * GPS, baro, mag, lidar, radar, optical flow, ZUPT, OOSM, the works.
+ * Optimized for high-frequency execution on embedded targets.
  */
 
 #include "eskf_core.hpp"
@@ -319,8 +317,8 @@ bool ESKFCore::update_external(const VecXd& z, const VecXd& z_pred,
     // Chi-squared threshold
     double chi2_thresh;
     switch (m) {
-        case 1: chi2_thresh = 5.991; break;
-        case 2: chi2_thresh = 9.210; break;
+        case 1: chi2_thresh = 3.841; break;
+        case 2: chi2_thresh = 5.991; break;
         case 3: chi2_thresh = 7.815; break;
         default: chi2_thresh = 3.0 * m; break;
     }

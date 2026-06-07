@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_rtk_transitions.py module.
+# Does exactly what you think it does.
+
 """RTK state transitions and RTCM stream tests.
 
 Tests:

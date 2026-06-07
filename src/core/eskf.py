@@ -1,33 +1,6 @@
 #!/usr/bin/env python3
-# 21-state Error-State Quaternion EKF (ESKF) — NavCore-Pixhawk
-#
-# Nominal state (21):
-#   x = [px, py, pz,                   # 0:3   position (NED, m)
-#        vx, vy, vz,                    # 3:6   velocity (NED, m/s)
-#        qw, qx, qy, qz,               # 6:10  attitude quaternion
-#        ba_x, ba_y, ba_z,              # 10:13 accel bias (m/s²)
-#        bg_x, bg_y, bg_z,              # 13:16 gyro bias (rad/s)
-#        baro_bias,                     # 16    barometric altitude bias (m)
-#        clk_bias,                      # 17    GNSS receiver clock bias (m)
-#        clk_drift,                     # 18    GNSS receiver clock drift (m/s)
-#        wind_n, wind_e]                # 19:21 wind velocity NED horizontal (m/s)
-#
-# Error state (20):
-#   dx = [dp(3), dv(3), dtheta(3),      # 0:9   pos, vel, attitude error
-#         dba(3), dbg(3),                # 9:15  bias errors
-#         d_baro_bias,                   # 15    baro bias error
-#         d_clk_bias,                    # 16    clock bias error
-#         d_clk_drift,                   # 17    clock drift error
-#         d_wind_n, d_wind_e]            # 18:20 wind error
-#
-# Upgraded from 16-state with:
-#   - Baro bias as proper filter state (replaces EMA hack)
-#   - GNSS receiver clock bias/drift for tight coupling
-#   - Wind velocity estimation for multi-rotor accuracy
-#   - RK4 quaternion integration (replaces Euler)
-#   - Iterated EKF (IEKF) for nonlinear measurements
-#
-# If this crashes, the drone probably will too. No pressure.
+# 21-state ESKF. The core math engine.
+# Keeps the drone flying instead of falling.
 
 import numpy as np
 import math
@@ -41,11 +14,12 @@ log = logging.getLogger("eskf_core")
 
 GRAVITY_NED = np.array([0.0, 0.0, 9.80665])
 
+# State dimensions
 # Error-state dimension constants
 NOMINAL_DIM = 21
 ERROR_DIM = 20
 
-# State index constants (nominal)
+# State indices — State vector indices
 POS = slice(0, 3)
 VEL = slice(3, 6)
 QUAT = slice(6, 10)
@@ -56,7 +30,7 @@ CLK_BIAS_IDX = 17
 CLK_DRIFT_IDX = 18
 WIND = slice(19, 21)
 
-# Error-state index constants
+# Error-state indices — Error state indices
 E_POS = slice(0, 3)
 E_VEL = slice(3, 6)
 E_ATT = slice(6, 9)
@@ -67,8 +41,9 @@ E_CLK_BIAS = 16
 E_CLK_DRIFT = 17
 E_WIND = slice(18, 20)
 
-# Chi-squared thresholds for innovation gating (95% confidence)
-CHI2_THRESHOLDS = {1: 5.991, 2: 9.210, 3: 7.815, 4: 9.488, 5: 11.07}
+# Chi-squared thresholds (95% confidence) — Innovation gating thresholds
+# 
+CHI2_THRESHOLDS = {1: 3.841, 2: 5.991, 3: 7.815, 4: 9.488, 5: 11.07}
 
 
 class EKFHealth(Enum):
@@ -79,23 +54,29 @@ class EKFHealth(Enum):
 
 
 class ESKF:
-    """21-state Error-State Kalman Filter with RK4 and IEKF support."""
+    """21-state Error-State Kalman Filter.
+    
+    Features RK4 integration, IEKF updates, square-root covariance,
+    
+    
+    
+    """
 
-    # Safety bounds
-    VEL_WARN = 30.0       # m/s
-    VEL_FAULT = 100.0     # m/s
-    TILT_WARN_DEG = 60.0
-    TILT_FAULT_DEG = 80.0
-    ACCEL_BIAS_LIMIT = 2.0   # m/s²
-    GYRO_BIAS_LIMIT = 0.1    # rad/s
-    BARO_BIAS_LIMIT = 15.0   # m — max baro bias
-    WIND_LIMIT = 25.0        # m/s — max estimated wind
-    P_TRACE_LIMIT = 1e9
-    P_COND_LIMIT = 1e15
-    Z_COV_CONVERGED = 1.5   # z-axis covariance threshold (m²)
-    SYMMETRY_INTERVAL = 50
+    # Safety guardrails — Physical constraints for divergence protection
+    VEL_WARN = 30.0       # m/s — Velocity warning threshold
+    VEL_FAULT = 100.0     # m/s — Velocity fault threshold
+    TILT_WARN_DEG = 60.0  # Tilt warning threshold
+    TILT_FAULT_DEG = 80.0 # Tilt fault threshold
+    ACCEL_BIAS_LIMIT = 2.0   # m/s² — Accel bias limit
+    GYRO_BIAS_LIMIT = 0.1    # rad/s — Gyro bias limit
+    BARO_BIAS_LIMIT = 15.0   # m — Barometer bias limit
+    WIND_LIMIT = 25.0        # m/s — Wind limit
+    P_TRACE_LIMIT = 1e9      # Maximum covariance trace limit
+    P_COND_LIMIT = 1e15      # Maximum covariance condition number
+    Z_COV_CONVERGED = 1.5    # z-axis covariance threshold (m²) — Z-axis covariance convergence threshold
+    SYMMETRY_INTERVAL = 50   # re-symmetrize P every N steps 
 
-    # Mag rejection thresholds
+    # Mag rejection — Magnetometer rejection parameters
     MAG_NORM_TOLERANCE = 0.30
     MAG_REJECT_DURATION = 2.0
 
@@ -112,55 +93,56 @@ class ESKF:
         self._innovation_stats = {"baro": [], "mag": []}
         self._sensor_rejections = {}
 
-        # Adaptive process noise (Feature 6)
+        # How shaky is the drone? This scales process noise. Smooth flight = tight filter.
         self._vibration_scale = 1.0
 
-        # --- Nominal state (21) ---
+        # --- The 21 numbers that define our reality ---
         self.x = np.zeros(NOMINAL_DIM)
-        self.x[6] = 1.0  # qw = 1 (identity quaternion)
+        self.x[6] = 1.0  # qw = 1 → "I have no idea which way I'm pointing yet"
 
-        # --- Error-state covariance (20x20) ---
+        # --- Initial uncertainty: "we know nothing" matrix ---
         P_init = np.eye(ERROR_DIM)
-        P_init[E_POS, E_POS] *= 1.0      # position
-        P_init[E_VEL, E_VEL] *= 0.1      # velocity
-        P_init[E_ATT, E_ATT] *= 0.01     # attitude
-        P_init[E_ABIAS, E_ABIAS] *= 0.01 # accel bias
-        P_init[E_GBIAS, E_GBIAS] *= 0.001  # gyro bias
-        P_init[E_BARO_BIAS, E_BARO_BIAS] = 25.0   # baro bias: ±5m initial uncertainty
-        # ~100 m initial clock bias σ (1e4 m²). 1e6 made cond(P)≈1e9 and broke NEES/NIS numerics.
+        P_init[E_POS, E_POS] *= 1.0      # position: ±1m (optimistic)
+        P_init[E_VEL, E_VEL] *= 0.1      # velocity: ±0.3m/s (sitting still hopefully)
+        P_init[E_ATT, E_ATT] *= 0.01     # attitude: ±6° (gravity told us most of it)
+        P_init[E_ABIAS, E_ABIAS] *= 0.01 # accel bias: small, for now
+        P_init[E_GBIAS, E_GBIAS] *= 0.001  # gyro bias: even smaller
+        P_init[E_BARO_BIAS, E_BARO_BIAS] = 25.0   # baro: ±5m, because weather exists
+        # Clock bias: ~100m uncertainty. We tried 1e6 once. cond(P) hit 1e9. Dark times.
         P_init[E_CLK_BIAS, E_CLK_BIAS] = 1e4
-        P_init[E_CLK_DRIFT, E_CLK_DRIFT] = 100.0   # clock drift
-        P_init[E_WIND, E_WIND] *= 10.0              # wind: ±3.2 m/s initial
+        P_init[E_CLK_DRIFT, E_CLK_DRIFT] = 100.0   # clock drift: it wanders
+        P_init[E_WIND, E_WIND] *= 10.0              # wind: ±3m/s (could be anything)
         
-        # Upper triangular Cholesky factor U (where P = U @ U.T)
+        # Square-root form: store U where P = Uᵀ U. Keeps P positive-definite 
+        # even when the math gets spicy. Cholesky is our best friend.
         self.U = np.linalg.cholesky(P_init).T
 
-        # --- Health Monitoring Buffers ---
+        # --- Health monitoring (the filter's blood pressure monitor) ---
         from collections import deque
-        self.innovation_history = deque(maxlen=500)  # (time, source, y, S)
-        self.health_history = deque(maxlen=500)      # (time, cond_num, min_diag, max_diag)
-        self.cond_num = 1.0
+        self.innovation_history = deque(maxlen=500)  # did the measurements make sense?
+        self.health_history = deque(maxlen=500)      # is the math still numerically stable?
+        self.cond_num = 1.0   # condition number: 1.0 = chef's kiss, 1e15 = game over
         self.min_diag_U = 1.0
         self.max_diag_U = 1.0
         
-        # Actionable Health Metrics
+        # Failure counters — track how many times we've had to resuscitate the filter
         self.cholesky_failures = 0
         self.innovation_spikes = 0
         self.covariance_repairs = 0
 
-        # Last bias-compensated gyro measurement (body rates, rad/s)
+        # Last bias-compensated gyro (body rates, rad/s) — needed for rotation compensation
         self._last_gyro = np.zeros(3)
-        # --- Process noise (Continuous-Time Model Q_c) ---
-        # The continuous-time process model is: dx_err/dt = F * x_err + G * w
-        # where w is continuous-time white noise with Power Spectral Density (PSD) Q_c.
-        # Accelerometer and Gyro noise are assumed isotropic in the body frame: E[w w^T] = sigma^2 I
-        # Because the mapping matrix G for velocity is -R(q), the noise mapped to global frame is:
-        # G Q_c G^T = R(q) (sigma^2 I) R(q)^T = sigma^2 I.
-        # This allows us to use a purely diagonal Q_c matrix and simply scale by dt
-        # for the discrete-time noise Q_d ≈ Q_c * dt.
+
+        # --- Process noise: the "how uncertain are we about physics?" matrix ---
+        # Q_c is the continuous-time Power Spectral Density (PSD) of process noise.
+        # The math: dx_err/dt = F·x_err + G·w, where w ~ N(0, Q_c).
+        # For accelerometers: noise maps through rotation R(q), but since
+        # G·Q_c·Gᵀ = R·(σ²I)·Rᵀ = σ²I, the rotation cancels out.
+        # Translation: we can use a diagonal Q_c. Small mercies.
+        # Discrete-time: Q_d ≈ Q_c · dt. Close enough for government work.
         
         self.Q_base = np.zeros((ERROR_DIM, ERROR_DIM))
-        # sa and sg are PSDs: (m/s^2)^2/Hz and (rad/s)^2/Hz
+        # Power spectral densities — how noisy are these sensors, really?
         sa = noise.accel_std ** 2
         sg = noise.gyro_std ** 2
         sab = (2.0 * noise.accel_bias_std ** 2 / max(noise.accel_bias_tau, 1.0))
@@ -169,33 +151,32 @@ class ESKF:
         np.fill_diagonal(self.Q_base[E_ATT, E_ATT], sg)
         np.fill_diagonal(self.Q_base[E_ABIAS, E_ABIAS], sab)
         np.fill_diagonal(self.Q_base[E_GBIAS, E_GBIAS], sgb)
-        # Baro bias: random walk (slow drift ~0.01 m/√s)
+        # Baro bias: drifts like a daydreaming sailor (~0.01 m/√s)
         self.Q_base[E_BARO_BIAS, E_BARO_BIAS] = 0.01 ** 2
-        # Clock bias: driven by clock drift (coupled in F)
+        # Clock bias: dragged along by clock drift (they're coupled in F, it's complicated)
         self.Q_base[E_CLK_BIAS, E_CLK_BIAS] = 0.1 ** 2
-        # Clock drift: TCXO stability (~1e-9 relative → ~0.3 m/s²)
+        # Clock drift: TCXO stability is ~1ppb → translates to ~0.3 m/s per second of thinking
         self.Q_base[E_CLK_DRIFT, E_CLK_DRIFT] = 0.3 ** 2
-        # Wind: random walk (~0.5 m/s/√s for turbulence)
+        # Wind: changes unpredictably, because it's wind (~0.5 m/s/√s for turbulence)
         np.fill_diagonal(self.Q_base[E_WIND, E_WIND], 0.5 ** 2)
         self.Q = self.Q_base.copy()
 
-        # --- Measurement noise ---
+        # --- Measurement noise (how much do we trust each sensor? spoiler: not much) ---
         self.R_baro = np.array([[noise.baro_std ** 2]])
         self.R_mag = np.array([[noise.mag_std ** 2]])
         self._R_mag_base = noise.mag_std ** 2
 
-        # --- Observation matrices (20-col for error state) ---
-        self.H_baro = np.zeros((1, ERROR_DIM))
-        self.H_baro[0, 2] = 1.0   # observes dp_z
-        self.H_baro[0, E_BARO_BIAS] = -1.0  # minus baro bias
+        # --- Observation matrices (H maps error-state to measurement space) ---
+        # H_baro is built fresh in update_baro() every time — the sign convention
+        # is tricky and we got burned storing it wrong here once. Never again.
 
         self.H_mag = np.zeros((1, ERROR_DIM))
-        self.H_mag[0, 8] = 1.0    # observes dtheta_z (yaw error)
+        self.H_mag[0, 8] = 1.0    # yaw is the only thing mag can reliably tell us
 
         log.info(f"ESKF initialized: {NOMINAL_DIM}-state nominal, "
                  f"{ERROR_DIM}-state error, SR-ESKF/RK4, IEKF enabled")
 
-    # ── Properties ─────────────────────────────────────────────
+    # ── Properties (getters that do math behind your back) ─────
 
     @property
     def P(self) -> np.ndarray:
@@ -238,7 +219,7 @@ class ESKF:
         """Estimated wind velocity [North, East] (m/s)."""
         return self.x[WIND].copy()
 
-    # ── Initialization ─────────────────────────────────────────
+    # ── Initialization (stare at gravity, figure out which way is up) ──
 
     def initialize_from_sensors(self, accel_samples: np.ndarray,
                                 mag_samples: np.ndarray) -> bool:
@@ -254,12 +235,12 @@ class ESKF:
             log.warning(f"IMU variance too high ({accel_var:.2f}), drone may be moving")
             return False
 
-        # Roll and pitch from gravity vector
+        # Roll and pitch from gravity — Newton's contribution to our startup routine
         ax, ay, az = accel_mean
         roll = math.atan2(ay, az)
         pitch = math.atan2(-ax, math.sqrt(ay**2 + az**2))
 
-        # Yaw from magnetometer (tilt-compensated)
+        # Yaw from magnetometer (tilt-compensated, because raw mag yaw is a lie on a tilt)
         mag_mean = np.mean(mag_samples, axis=0)
         cr, sr = math.cos(roll), math.sin(roll)
         cp, sp = math.cos(pitch), math.sin(pitch)
@@ -268,10 +249,10 @@ class ESKF:
         mag_y = my * cr - mz * sr
         yaw = math.atan2(-mag_y, mag_x)
 
-        # Store calibrated mag norm
+        # Remember this mag reading — we'll use it to reject bad mag data later
         self._calibrated_mag_norm = np.linalg.norm(mag_mean)
 
-        # Set nominal state
+        # Set the nominal state — the filter's first guess at reality
         self.x[QUAT] = self._euler_to_quat(roll, pitch, yaw)
         self.x[POS] = 0.0
         self.x[VEL] = 0.0
@@ -288,13 +269,13 @@ class ESKF:
                  f"pitch={math.degrees(pitch):.1f} yaw={math.degrees(yaw):.1f}")
         return True
 
-    # ── Predict (RK4 Integration) ──────────────────────────────
+    # ── Predict (RK4 — because Euler integration was basically gambling) ──
 
     def predict(self, accel_raw: np.ndarray, gyro_raw: np.ndarray, dt: float):
-        """Predict step using 4th-order Runge-Kutta integration.
+        """Predict step with RK4 integration.
 
-        Replaces the old Euler integration for significantly reduced
-        integration error at the same 100 Hz rate.
+        4th-order Runge-Kutta: 4× the work of Euler, 10000× the accuracy.
+        The old Euler integrator was basically flipping a coin at 100Hz.
         """
         if dt <= 0:
             return

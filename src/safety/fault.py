@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Fault management.
 # The panic button coordinator.
 
 import time
@@ -11,7 +12,7 @@ log = logging.getLogger("fault_manager")
 
 
 class FlightMode(Enum):
-    # what mode are we in right now
+    # Current flight mode.
     NOMINAL    = auto()   # All sensors healthy, full ESKF
     DEGRADED   = auto()   # Some sensors missing, reduced accuracy
     FAILSAFE   = auto()   # Critical sensor loss, dead-reckoning only
@@ -20,7 +21,7 @@ class FlightMode(Enum):
 
 
 class SensorStatus(Enum):
-    # is this sensor alive, sick, or dead?
+    # Sensor health status.
     ACTIVE    = auto()
     STALE     = auto()   # No data for > timeout
     REJECTED  = auto()   # Data arriving but failing quality checks
@@ -29,7 +30,7 @@ class SensorStatus(Enum):
 
 @dataclass
 class SensorHealth:
-    # keeps tabs on each sensor's heartbeat
+    # Tracks individual sensor health.
     name: str
     status: SensorStatus = SensorStatus.OFFLINE
     last_update_t: float = 0.0
@@ -39,18 +40,18 @@ class SensorHealth:
     rejected_samples: int = 0
 
     def mark_active(self, t: float):
-        # sensor checked in, all good
+        # Mark sensor active.
         self.status = SensorStatus.ACTIVE
         self.last_update_t = t
         self.total_samples += 1
 
     def mark_rejected(self, t: float):
-        # sensor gave us garbage, noted
+        # Mark sensor data rejected.
         self.rejected_samples += 1
         self.last_update_t = t
 
     def check_staleness(self, t_now: float):
-        # has this sensor gone quiet on us?
+        # Check sensor timeout.
         if self.status == SensorStatus.OFFLINE:
             return
         if t_now - self.last_update_t > self.timeout_s:
@@ -67,7 +68,7 @@ class SensorHealth:
 
 
 class FaultManager:
-    # the boss — watches all sensors and decides if we're okay to fly
+    # Manages overall system fault state.
 
     # Hysteresis: require N consecutive good cycles before recovery
     RECOVERY_THRESHOLD = 50
@@ -100,7 +101,7 @@ class FaultManager:
 
     def report_sensor_update(self, sensor_name: str, t: float,
                              rejected: bool = False):
-        # main loop calls this when new data arrives
+        # Handle sensor update.
         if sensor_name not in self.sensors:
             return
 
@@ -154,7 +155,7 @@ class FaultManager:
 
     def _evaluate_mode(self, imu_ok: bool, baro_ok: bool, mag_ok: bool,
                        ekf_healthy: bool, safety_ok: bool, ml_fault: bool) -> FlightMode:
-        # the decision tree — what mode should we be in?
+        # Determine optimal flight mode.
         # EMERGENCY: no IMU or estimator diverged
         if not imu_ok:
             return FlightMode.EMERGENCY
@@ -166,7 +167,7 @@ class FaultManager:
         if not baro_ok and not mag_ok:
             return FlightMode.FAILSAFE
 
-        # PREDICTIVE_FAIL: The ML brain says we're about to crash
+        # PREDICTIVE_FAIL: Machine learning anomaly detected.
         if ml_fault:
             return FlightMode.PREDICTIVE_FAIL
 
@@ -178,7 +179,7 @@ class FaultManager:
         return FlightMode.NOMINAL
 
     def _transition(self, new_mode: FlightMode, t: float):
-        # switch to a new mode and deal with the consequences
+        # Execute mode transition.
         if new_mode == self._mode:
             return
 
@@ -210,7 +211,7 @@ class FaultManager:
         return False
 
     def get_status_summary(self) -> dict:
-        # health report — everything at a glance
+        # Get comprehensive status summary.
         return {
             "mode": self._mode.name,
             "sensors": {

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# When the sensors die, we just guess where we are based on where we were. It works... for a few seconds.
+# Dead reckoning fallback.
+# When sensors fail, we just integrate and pray.
 
 import math
 import numpy as np
@@ -9,7 +10,7 @@ GRAVITY = np.array([0.0, 0.0, 9.80665])
 
 
 class DeadReckon:
-    # when sensors die, we just wing it with pure integration
+    # Performs pure inertial integration during sensor loss.
 
     def __init__(self, noise: IMUNoiseParams):
         self.pos   = np.zeros(3)

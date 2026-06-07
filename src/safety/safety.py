@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# If things get too crazy, we trigger RTL (Return To Land). Please don't hit a tree on the way back.
+# Safety Monitor.
+# The designated adult of the system.
 
 import math
 import logging
@@ -10,16 +11,17 @@ log = logging.getLogger("safety_monitor")
 
 
 class SafetyAction(Enum):
-    # what should we do — fly, warn, or panic?
+    # Safety action types.
     NOMINAL = 0           # All clear — inject normally
     WARN = 1              # Elevated but acceptable — log warning
     LIMIT = 2             # Apply output limiting (clamp)
     DISABLE_INJECTION = 3 # Stop sending position to ArduPilot
-    FORCE_DISARM = 4      # Critical — request disarm
+    FORCE_DISARM = 4      # Critical — request disarm (emergency disarm)
 
 
 class SafetyMonitor:
-    # the guardrails — won't let you fly into a mountain
+    # Monitors system state for safety violations.
+    # Applies configured thresholds to ESKF output.
 
     def __init__(self,
                  max_horizontal_vel: float = 30.0,
@@ -59,7 +61,7 @@ class SafetyMonitor:
 
     def check(self, pos: np.ndarray, vel: np.ndarray,
               euler_rad: np.ndarray) -> SafetyAction:
-        # is the filter's output reasonable or insane?
+        # Check state against limits.
         self.stats["total_checks"] += 1
         violations = []
 
@@ -155,7 +157,7 @@ class SafetyMonitor:
         return self._last_action.value < SafetyAction.DISABLE_INJECTION.value
 
     def reset(self):
-        # all clear, reset the warning counters
+        # Reset safety monitor.
         self._last_pos = None
         self._consecutive_violations = 0
         self._last_action = SafetyAction.NOMINAL

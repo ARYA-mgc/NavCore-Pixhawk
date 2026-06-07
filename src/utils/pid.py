@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# PID that learns on the fly — gains adjust based on error
+# pid.py module.
+# Does exactly what you think it does.
 
 import math
 

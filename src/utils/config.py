@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Reading the JSON files so we don't hardcode everything (even though we want to).
+# config.py module.
+# Does exactly what you think it does.
 
 import os
 import yaml

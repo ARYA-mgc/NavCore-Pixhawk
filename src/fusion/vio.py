@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Camera plus math equals position. Don't cover the lens.
+# Visual Inertial Odometry.
+# Camera + Math = Position. Keep the lens clean.
 
 import logging
 import math

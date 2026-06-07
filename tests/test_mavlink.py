@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_mavlink.py module.
+# Does exactly what you think it does.
+
 """MAVLink integration tests.
 
 Tests parsing logic using INLINED scale constants (no pymavlink needed).
@@ -14,7 +17,7 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-# ── Inline MAVLink constants from mavlink.py ──────────────────
+#  Inline MAVLink constants from mavlink.py 
 # These are physics constants, not pymavlink-specific
 ACCEL_SCALE = 9.80665 / 2048.0
 GYRO_SCALE = (math.pi / 180.0) / 16.384
@@ -23,7 +26,7 @@ SEA_LEVEL_PA = 101325.0
 BARO_EXPONENT = 1.0 / 5.257
 
 
-# ── Mock MAVLink Messages ─────────────────────────────────────
+#  Mock MAVLink Messages 
 
 class MockRawIMU:
     def __init__(self, xacc=0, yacc=0, zacc=-2048, xgyro=0, ygyro=0, zgyro=0):
@@ -44,7 +47,7 @@ class MockGPSRTCMData:
         self.data = data if data else bytes(range(min(length, 180)))
 
 
-# ── Inline parsing functions (mirrors mavlink.py) ─────────────
+#  Inline parsing functions (mirrors mavlink.py) 
 
 def parse_raw_imu(msg):
     accel = np.array([msg.xacc * ACCEL_SCALE,
@@ -69,7 +72,7 @@ def parse_mag_yaw(msg):
     return math.atan2(-my, mx)
 
 
-# ── Test: Sensor Parsing ──────────────────────────────────────
+#  Test: Sensor Parsing 
 
 class TestMAVLinkParsing:
 
@@ -111,7 +114,7 @@ class TestMAVLinkParsing:
         assert parse_mag_yaw(msg) is None
 
 
-# ── Test: SYSID / Component ID ────────────────────────────────
+#  Test: SYSID / Component ID 
 
 class TestSYSIDConflict:
     """Verify component ID constants used in mavlink.py."""
@@ -127,7 +130,7 @@ class TestSYSIDConflict:
         assert True
 
 
-# ── Test: RTCM Forwarding Logic ───────────────────────────────
+#  Test: RTCM Forwarding Logic 
 
 class TestRTCMForwarding:
 
@@ -167,7 +170,7 @@ class TestRTCMForwarding:
         assert reassembled[0] == 0xD3
 
 
-# ── Test: Named Values ────────────────────────────────────────
+#  Test: Named Values 
 
 class TestNamedValues:
 

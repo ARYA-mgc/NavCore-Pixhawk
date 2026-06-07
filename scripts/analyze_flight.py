@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Flight log analyzer.
+# Figuring out why it crashed yesterday.
+
 """Post-Flight Analysis — RTK Ground Truth Validation Report.
 
 Comprehensive analysis tool that unifies rtk_validate.py + gt_eval.py
@@ -45,7 +48,7 @@ try:
 except ImportError:
     HAS_PLOT = False
 
-# ── Flight Phase Detection ─────────────────────────────────────
+#  Flight Phase Detection 
 
 class FlightPhase:
     GROUND    = "GROUND"
@@ -131,7 +134,7 @@ def detect_flight_phases(times: np.ndarray, pos: np.ndarray,
     return merged
 
 
-# ── Data Loaders ────────────────────────────────────────────────
+#  Data Loaders 
 
 def load_csv_data(path: str) -> list:
     """Load CSV as list of dicts with float values (matching rtk_validate.py)."""
@@ -203,7 +206,7 @@ def load_rtk_ground_truth(path: str) -> List[Pose]:
     return poses
 
 
-# ── Analysis Engine ─────────────────────────────────────────────
+#  Analysis Engine 
 
 @dataclass
 class FlightAnalysis:
@@ -233,7 +236,7 @@ def analyze_flight(data_dir: str, replay: bool = False) -> FlightAnalysis:
         data_dir: path to flight data directory
         replay: if True, replay ESKF from sensor data (like rtk_validate.py)
     """
-    # ── Load data ─────────────────────────────────────────────
+    #  Load data 
     rtk_path = os.path.join(data_dir, "rtk_ground_truth.csv")
     gt_poses = load_rtk_ground_truth(rtk_path)
 
@@ -249,14 +252,14 @@ def analyze_flight(data_dir: str, replay: bool = False) -> FlightAnalysis:
             print("No eskf_state.csv found. Use --replay to run ESKF offline.")
             est_poses = _run_eskf_replay(data_dir)
 
-    # ── Time alignment ────────────────────────────────────────
+    #  Time alignment 
     pairs = align_timestamps(est_poses, gt_poses, max_dt=0.1)
 
     if len(pairs) < 3:
         raise ValueError(f"Only {len(pairs)} aligned pose pairs — "
                          f"need at least 3. Check time sync.")
 
-    # ── APE / RPE ─────────────────────────────────────────────
+    #  APE / RPE 
     ape = compute_ape(pairs, align=True)
     rpe = compute_rpe(pairs, delta=10)
 
@@ -276,13 +279,13 @@ def analyze_flight(data_dir: str, replay: bool = False) -> FlightAnalysis:
     errors_v = np.abs(est_aligned[:, 2] - gt_pos[:, 2])
     times = np.array([p[0].t for p in pairs])
 
-    # ── Convergence time ──────────────────────────────────────
+    #  Convergence time 
     conv_time = _detect_convergence(errors_3d, times)
 
-    # ── Drift rate ────────────────────────────────────────────
+    #  Drift rate 
     drift_rate = _compute_drift_rate(errors_3d, times)
 
-    # ── Flight phases ─────────────────────────────────────────
+    #  Flight phases 
     gt_times = np.array([p.t for p in gt_poses])
     gt_positions = np.array([p.pos for p in gt_poses])
     gt_velocities = np.array([p.vel for p in gt_poses])
@@ -302,7 +305,7 @@ def analyze_flight(data_dir: str, replay: bool = False) -> FlightAnalysis:
                 "duration_s": seg.t_end - seg.t_start,
             }
 
-    # ── RTK quality stats ─────────────────────────────────────
+    #  RTK quality stats 
     rtk_data = load_csv_data(rtk_path)
     rtk_stats = _compute_rtk_stats(rtk_data)
 
@@ -448,7 +451,7 @@ def _compute_rtk_stats(rtk_data: list) -> dict:
     return stats
 
 
-# ── Plotting ────────────────────────────────────────────────────
+#  Plotting 
 
 def generate_plots(analysis: FlightAnalysis, output_dir: str):
     """Generate all validation plots as PNG files."""
@@ -470,7 +473,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
 
     times = analysis.times - analysis.times[0]  # relative time
 
-    # ── Plot 1: 2D Trajectory Overlay (NE plane) ─────────────
+    #  Plot 1: 2D Trajectory Overlay (NE plane) 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.plot(gt_pos[:, 1], gt_pos[:, 0], 'b-', linewidth=1.5,
             label='RTK Ground Truth', zorder=3)
@@ -490,7 +493,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
     fig.savefig(os.path.join(output_dir, "trajectory_2d.png"), dpi=150)
     plt.close(fig)
 
-    # ── Plot 2: Per-Axis Position Comparison ──────────────────
+    #  Plot 2: Per-Axis Position Comparison 
     fig, axes = plt.subplots(3, 1, figsize=(14, 9), sharex=True)
     labels = ["North (m)", "East (m)", "Down (m)"]
     for i, (ax, label) in enumerate(zip(axes, labels)):
@@ -506,7 +509,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
     fig.savefig(os.path.join(output_dir, "position_comparison.png"), dpi=150)
     plt.close(fig)
 
-    # ── Plot 3: APE Time Series ───────────────────────────────
+    #  Plot 3: APE Time Series 
     fig, ax = plt.subplots(figsize=(14, 5))
     ax.plot(times, analysis.errors_3d, 'r-', linewidth=0.8, label='3D APE')
     ax.plot(times, analysis.errors_h, 'b-', linewidth=0.6,
@@ -528,7 +531,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
     fig.savefig(os.path.join(output_dir, "ape_timeseries.png"), dpi=150)
     plt.close(fig)
 
-    # ── Plot 4: Convergence Time Graph ────────────────────────
+    #  Plot 4: Convergence Time Graph 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
 
     # Error convergence
@@ -568,7 +571,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
     fig.savefig(os.path.join(output_dir, "convergence.png"), dpi=150)
     plt.close(fig)
 
-    # ── Plot 5: Per-Phase Error Bar Chart ─────────────────────
+    #  Plot 5: Per-Phase Error Bar Chart 
     if analysis.per_phase_ape:
         fig, ax = plt.subplots(figsize=(10, 5))
         phase_names = list(analysis.per_phase_ape.keys())
@@ -595,7 +598,7 @@ def generate_plots(analysis: FlightAnalysis, output_dir: str):
     print(f"Plots saved to {output_dir}/")
 
 
-# ── Markdown Report ─────────────────────────────────────────────
+#  Markdown Report 
 
 def generate_report(analysis: FlightAnalysis, output_dir: str,
                     data_dir: str):
@@ -698,7 +701,7 @@ def generate_report(analysis: FlightAnalysis, output_dir: str,
     print(f"Report saved to {report_path}")
 
 
-# ── CLI Entry Point ─────────────────────────────────────────────
+#  CLI Entry Point 
 
 def print_console_report(a: FlightAnalysis):
     """Print analysis results to console."""
@@ -716,7 +719,7 @@ def print_console_report(a: FlightAnalysis):
     print(f"  Drift rate        : {drift}")
 
     print()
-    print("  ── Absolute Pose Error (APE) ─────────────")
+    print("   Absolute Pose Error (APE) ")
     print(f"  3D RMSE           : {a.ape['rmse']:.4f} m")
     print(f"  3D Mean           : {a.ape['mean']:.4f} m")
     print(f"  3D Max            : {a.ape['max']:.4f} m")
@@ -726,21 +729,21 @@ def print_console_report(a: FlightAnalysis):
           f"{float(np.sqrt(np.mean(a.errors_v**2))):.4f} m")
 
     print()
-    print("  ── Relative Pose Error (RPE, δ=10) ───────")
+    print("   Relative Pose Error (RPE, δ=10) ")
     print(f"  RMSE              : {a.rpe['rmse']:.4f} m")
     print(f"  Mean              : {a.rpe['mean']:.4f} m")
     print(f"  Max               : {a.rpe['max']:.4f} m")
 
     if a.per_phase_ape:
         print()
-        print("  ── Per-Phase APE ─────────────────────────")
+        print("   Per-Phase APE ")
         for phase, m in a.per_phase_ape.items():
             print(f"  {phase:<12} RMSE={m['rmse']:.4f}m  "
                   f"Mean={m['mean']:.4f}m  Max={m['max']:.4f}m  "
                   f"({m['n_samples']} pts, {m['duration_s']:.1f}s)")
 
     print()
-    print("  ── RTK Quality ───────────────────────────")
+    print("   RTK Quality ")
     rtk = a.rtk_stats
     print(f"  RTK FIXED         : {rtk.get('rtk_fixed_pct', 0):.1f}%")
     if "h_acc_mean_m" in rtk:

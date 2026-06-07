@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_system.py module.
+# Does exactly what you think it does.
+
 """System-level tests: vibration, maneuvers, compass disturbance, EKF recovery.
 
 Tests:
@@ -31,7 +34,7 @@ def make_eskf():
     return eskf, noise
 
 
-# ── Test: Compass Disturbance ─────────────────────────────────
+#  Test: Compass Disturbance 
 
 class TestCompassDisturbance:
     """Simulate magnetic interference from motors and nearby metal."""
@@ -148,7 +151,7 @@ class TestCompassDisturbance:
         assert not np.any(np.isnan(eskf.x))
 
 
-# ── Test: Vibration Effects ───────────────────────────────────
+#  Test: Vibration Effects 
 
 class TestVibrationEffects:
     """Simulate high-frequency IMU noise from propeller imbalance."""
@@ -197,7 +200,7 @@ class TestVibrationEffects:
         assert eskf._vibration_scale >= 1.0
 
 
-# ── Test: Aggressive Maneuvers ────────────────────────────────
+#  Test: Aggressive Maneuvers 
 
 class TestAggressiveManeuvers:
     """Simulate aggressive drone flight: fast yaw, banked turns, climbs."""
@@ -333,7 +336,7 @@ class TestAggressiveManeuvers:
         assert eskf.health != EKFHealth.FAULT
 
 
-# ── Test: Yaw Drift During Hover ──────────────────────────────
+#  Test: Yaw Drift During Hover 
 
 class TestYawDriftHover:
     """Hover for extended periods — yaw should not drift significantly."""

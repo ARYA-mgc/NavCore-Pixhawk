@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
-# Terrain Relative Navigation (TRN)
-#
-# GPS-denied absolute positioning using terrain profile matching.
-# Compares the Livox lidar terrain profile against a stored Digital
-# Elevation Model (DEM) to determine horizontal position.
-#
-# This is how cruise missiles navigate. Almost no open-source INS does this.
-#
-# Algorithm:
-#   1. Capture terrain height profile from Livox downward scan
-#   2. Extract terrain signature (height histogram + roughness features)
-#   3. Cross-correlate against DEM tiles using iterative closest point (ICP)
-#   4. Output position correction as ESKF measurement update
-#
-# Works without GPS, VIO, or any external aiding — just terrain shape.
+# Terrain Relative Navigation.
+# Basically cruise missile tech.
 
 import logging
 import math

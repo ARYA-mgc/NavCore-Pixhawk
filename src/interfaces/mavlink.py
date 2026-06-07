@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# mavlink_bridge.py
+# MAVLink bridge.
+# The phone line to the Pixhawk.
 
 import math
 import time
@@ -30,7 +31,7 @@ BARO_EXPONENT = 1.0 / 5.257
 
 # ────────────────────────────────────────────────────────────────
 class MAVLinkBridge:
-    # the phone line to the pixhawk — handles all the chatter
+    # MAVLink communication bridge.
 
     def __init__(self, connection_string: str = "/dev/ttyAMA0",
                  baud: int = 921600):
@@ -58,7 +59,7 @@ class MAVLinkBridge:
         log.info("MAVLink port opened (SYSID=1, COMPID=191)")
 
     def wait_heartbeat(self, timeout: float = 30.0):
-        # wait for the pixhawk to say hi
+        # Wait for heartbeat.
         log.info("Waiting for heartbeat …")
         self._conn.wait_heartbeat(timeout=timeout)
         self.last_heartbeat_t = time.monotonic()
@@ -186,7 +187,7 @@ class MAVLinkBridge:
 
     # ── command helpers ─────────────────────────────────────────
     def arm(self):
-        # ARM — props WILL spin, don't lose a finger
+        # ARM — Arm vehicle.
         log.warning("Sending ARM command")
         self._conn.mav.command_long_send(
             self._conn.target_system,
@@ -197,7 +198,7 @@ class MAVLinkBridge:
         )
 
     def disarm(self, force: bool = False):
-        # kill the motors, we're done
+        # Disarm vehicle.
         log.info("Sending DISARM command")
         self._conn.mav.command_long_send(
             self._conn.target_system,
@@ -205,12 +206,12 @@ class MAVLinkBridge:
             mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
             0,
             0,                      # disarm
-            21196.0 if force else 0,  # magic force-disarm value
+            21196.0 if force else 0,  # Force disarm value
             0, 0, 0, 0, 0,
         )
 
     def set_mode(self, mode_name: str):
-        # switch flight mode on the pixhawk
+        # Set flight mode.
         if self._conn is None or not hasattr(self._conn, "mode_mapping"):
             log.debug(f"set_mode({mode_name}) skipped: no MAVLink link")
             return
@@ -227,13 +228,13 @@ class MAVLinkBridge:
 
     def send_statustext(self, text: str,
                         severity: int = mavutil.mavlink.MAV_SEVERITY_INFO):
-        # put a message on the ground station screen
+        # Send status text.
         encoded = text[:50].encode("utf-8").ljust(50, b"\x00")
         self._conn.mav.statustext_send(severity, encoded)
 
     def send_vision_position(self, pos: np.ndarray,
                               q: np.ndarray, t_us: int = 0):
-        # tell the pixhawk where we think we are
+        # Send vision position estimate.
         if t_us == 0:
             t_us = int(time.monotonic() * 1e6)
         self._conn.mav.vision_position_estimate_send(

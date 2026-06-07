@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
-# Square-Root Error-State Kalman Filter (SR-ESKF)
-#
-# Replaces standard P matrix with Cholesky factor S where P = S·Sᵀ.
-# Guarantees positive-definiteness without eigenvalue clamping.
-#
-# Benefits:
-#   - Guaranteed positive-definite covariance (mathematically impossible to go negative)
-#   - No need for eigenvalue bounding / symmetry enforcement
-#   - ~50% fewer FLOPs for covariance propagation on ARM
-#   - Better numerical conditioning with single-precision floats
-#
-# This is what production aerospace systems use (Honeywell, Northrop).
+# Square-Root ESKF.
+# Because negative covariance is mathematically offensive.
 
 import numpy as np
 import math

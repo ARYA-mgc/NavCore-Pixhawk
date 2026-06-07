@@ -1,3 +1,6 @@
+# Multi-Hypothesis Tracking.
+# Trust issues with the GPS.
+
 import copy
 import logging
 import numpy as np

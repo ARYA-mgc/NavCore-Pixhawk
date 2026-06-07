@@ -1,3 +1,4 @@
+# Loop timing monitor.
 # Making sure the while loop doesn't take a nap.
 
 import time
@@ -21,7 +22,7 @@ class LoopMonitor:
         self._apply_rt_hints()
 
     def _apply_rt_hints(self):
-        # beg the OS for more CPU time
+        # Apply real-time scheduling hints.
         try:
             if os.name == 'posix':
                 # Nice value (requires root for negative values)
@@ -36,7 +37,7 @@ class LoopMonitor:
             log.debug(f"Could not set RT priority: {e}")
 
     def record_loop(self, loop_ms: float):
-        # how long did this loop take?
+        # Record loop execution time.
         self._loop_times_ms.append(loop_ms)
         if loop_ms > self._max_loop_ms:
             self._max_loop_ms = loop_ms
@@ -47,7 +48,7 @@ class LoopMonitor:
                 log.warning(f"Loop overrun: {loop_ms:.1f}ms (target {self.target_ms:.0f}ms)")
 
     def get_stats(self):
-        # timing stats for the curious
+        # Get loop timing statistics.
         if not self._loop_times_ms:
             return {"avg": 0.0, "max": 0.0, "p99": 0.0, "overruns": 0}
             
@@ -60,7 +61,7 @@ class LoopMonitor:
         }
 
     def print_histogram(self):
-        # draw a lil bar chart of how consistent the loop is
+        # Print loop timing histogram.
         if not self._loop_times_ms:
             return
             

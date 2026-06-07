@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Log validator.
+# Checking if the flight data is garbage.
+
 """Log Validator — pre-analysis synchronization and integrity check.
 
 Validates that all recorded sensor logs are synchronized, have no
@@ -22,7 +25,7 @@ from typing import List, Tuple, Dict, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
-# ── Validation Result ─────────────────────────────────────────
+#  Validation Result 
 
 class ValidationResult:
     """Result of a single validation check."""
@@ -63,7 +66,7 @@ class LogValidationReport:
         if self.streams:
             print(f"\n  {'Stream':<22} {'Samples':>8} {'Duration':>10} "
                   f"{'Rate':>8} {'Gaps':>6}")
-            print(f"  {'─'*22} {'─'*8} {'─'*10} {'─'*8} {'─'*6}")
+            print(f"  {''*22} {''*8} {''*10} {''*8} {''*6}")
             for name, info in self.streams.items():
                 print(f"  {name:<22} {info['count']:>8} "
                       f"{info['duration']:>9.1f}s "
@@ -72,7 +75,7 @@ class LogValidationReport:
 
         # Validation results
         print(f"\n  {'Check':<40} {'Result':>8}")
-        print(f"  {'─'*40} {'─'*8}")
+        print(f"  {''*40} {''*8}")
         for r in self.results:
             icon = "✓ PASS" if r.passed else (
                 "✗ FAIL" if r.severity == "ERROR" else "⚠ WARN")
@@ -88,7 +91,7 @@ class LogValidationReport:
         print("=" * 64)
 
 
-# ── Core Validation Functions ─────────────────────────────────
+#  Core Validation Functions 
 
 def load_timestamps(filepath: str) -> np.ndarray:
     """Load just the time_s column from a CSV file."""
@@ -153,7 +156,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
     """
     report = LogValidationReport()
 
-    # ── Check 1: Required files ───────────────────────────────
+    #  Check 1: Required files 
     required_files = {
         "imu_log.csv": "IMU",
         "baro_log.csv": "Barometer",
@@ -188,7 +191,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
     if not report.passed:
         return report
 
-    # ── Check 2: Analyze each stream ──────────────────────────
+    #  Check 2: Analyze each stream 
     stream_info = {}
     for filename, filepath in available_streams.items():
         name = filename.replace(".csv", "")
@@ -204,7 +207,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
             f"Only {info['count']} samples (need ≥{min_samples})",
             severity="ERROR"))
 
-    # ── Check 3: Time span overlap ────────────────────────────
+    #  Check 3: Time span overlap 
     if "imu_log" in stream_info and "rtk_ground_truth" in stream_info:
         imu = stream_info["imu_log"]
         rtk = stream_info["rtk_ground_truth"]
@@ -231,7 +234,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
             f"Possible clock drift or late start.",
             severity="WARNING" if time_offset < 10.0 else "ERROR"))
 
-    # ── Check 4: IMU gaps ─────────────────────────────────────
+    #  Check 4: IMU gaps 
     if "imu_log" in stream_info:
         imu = stream_info["imu_log"]
         report.add(ValidationResult(
@@ -249,7 +252,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
             f"IMU rate is {imu['rate']:.1f} Hz (expected ≥{expected_imu_hz})",
             severity="WARNING"))
 
-    # ── Check 5: RTK quality ──────────────────────────────────
+    #  Check 5: RTK quality 
     rtk_path = os.path.join(data_dir, "rtk_ground_truth.csv")
     if os.path.exists(rtk_path):
         rtk_fixed = 0
@@ -275,7 +278,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
                 f"Ground truth accuracy may be degraded.",
                 severity="WARNING" if pct > 20.0 else "ERROR"))
 
-    # ── Check 6: Monotonic timestamps ─────────────────────────
+    #  Check 6: Monotonic timestamps 
     for name, info in stream_info.items():
         times = info["times"]
         if len(times) > 1:
@@ -287,7 +290,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
                 f"{n_backwards} backwards jumps detected",
                 severity="ERROR"))
 
-    # ── Check 7: Baro/Mag rate consistency ────────────────────
+    #  Check 7: Baro/Mag rate consistency 
     for name, expected_min in [("baro_log", 5.0), ("mag_log", 3.0)]:
         if name in stream_info:
             info = stream_info[name]
@@ -300,7 +303,7 @@ def validate_logs(data_dir: str) -> LogValidationReport:
     return report
 
 
-# ── CLI Entry Point ───────────────────────────────────────────
+#  CLI Entry Point 
 
 def main():
     parser = argparse.ArgumentParser(

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Did we actually fly where we thought we did? Let's check.
+# Ground truth evaluation.
+# Did we actually go where we think we went?
 
 import csv
 import json
@@ -15,7 +16,7 @@ log = logging.getLogger("ground_truth_eval")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 
-# ── Data Structures ──────────────────────────────────────────
+#  Data Structures 
 
 @dataclass
 class Pose:
@@ -25,7 +26,7 @@ class Pose:
     vel: np.ndarray    # (3,) m/s
 
 
-# ── Loaders ──────────────────────────────────────────────────
+#  Loaders 
 
 def load_ground_truth_csv(path: str) -> List[Pose]:
     # load the RTK data (the 'right' answer)
@@ -80,7 +81,7 @@ def load_estimate_jsonl(path: str) -> List[Pose]:
     return poses
 
 
-# ── Time Alignment ──────────────────────────────────────────
+#  Time Alignment 
 
 def align_timestamps(est: List[Pose], gt: List[Pose],
                      max_dt: float = 0.05) -> List[Tuple[Pose, Pose]]:
@@ -98,7 +99,7 @@ def align_timestamps(est: List[Pose], gt: List[Pose],
     return pairs
 
 
-# ── Umeyama Alignment ──────────────────────────────────────
+#  Umeyama Alignment 
 
 def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
                       with_scale: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
@@ -128,7 +129,7 @@ def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
     return R, t, s
 
 
-# ── Error Metrics ──────────────────────────────────────────
+#  Error Metrics 
 
 def compute_ape(pairs: List[Tuple[Pose, Pose]],
                 align: bool = True) -> dict:
@@ -203,7 +204,7 @@ def print_results(ape: dict, rpe: dict):
     print(f"{'='*60}")
 
 
-# ── CLI Entry Point ────────────────────────────────────────
+#  CLI Entry Point 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO,

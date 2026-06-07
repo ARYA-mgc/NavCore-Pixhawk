@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
-# RAIM: Receiver Autonomous Integrity Monitoring
-# The module that separates hobbyist navigation from aviation-grade.
-#
-# Computes Protection Levels (PL) — quantified integrity bounds:
-#   "I am 99.9% confident my position is within X meters"
-#
-# Also performs fault detection via weighted least-squares residuals.
-# If PL > Alert Limit → automatic mission abort.
-#
-# Nobody else in open-source student projects has this.
+# RAIM integrity.
+# Aviation-grade paranoia.
 
 import math
 import logging

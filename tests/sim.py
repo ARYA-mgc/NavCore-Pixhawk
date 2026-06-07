@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# We simulate the drone flying 100 times because we don't want to crash 100 real drones.
-# Spoiler: The math wizard usually wins.
+# Simulator.
+# Fake physics for real bugs.
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_rtk.py module.
+# Does exactly what you think it does.
+
 """Unit tests for RTK ground truth pipeline.
 
 Tests:
@@ -24,7 +27,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
-# ── UBX Frame Construction Helpers ─────────────────────────────
+#  UBX Frame Construction Helpers 
 
 def build_ubx_frame(cls: int, msg_id: int, payload: bytes) -> bytes:
     """Build a complete UBX frame with valid Fletcher-8 checksum."""
@@ -101,7 +104,7 @@ def build_nav_hpposllh_payload(lat_deg=13.0827, lon_deg=80.2707,
     return bytes(payload)
 
 
-# ── Test: UBX NAV-PVT Parsing ──────────────────────────────────
+#  Test: UBX NAV-PVT Parsing 
 
 class TestUBXNavParsing:
 
@@ -200,7 +203,7 @@ class TestUBXNavParsing:
         assert abs(messages[1]["lat_deg"] - 20.0) < 1e-6
 
 
-# ── Test: WGS-84 → NED Conversion ─────────────────────────────
+#  Test: WGS-84 → NED Conversion 
 
 class TestWGS84toNED:
 
@@ -222,7 +225,7 @@ class TestWGS84toNED:
         assert abs(ned[2]) < 1.0  # down should be ~0
 
 
-# ── Test: Flight Recorder Round-Trip ──────────────────────────
+#  Test: Flight Recorder Round-Trip 
 
 class TestFlightRecorder:
 
@@ -286,7 +289,7 @@ class TestFlightRecorder:
             assert "sample_counts" in meta
 
 
-# ── Test: NTRIP GGA Generation ─────────────────────────────────
+#  Test: NTRIP GGA Generation 
 
 class TestNTRIPGGA:
 
@@ -325,7 +328,7 @@ class TestNTRIPGGA:
         assert ",W," in gga
 
 
-# ── Test: Log Validator ───────────────────────────────────────
+#  Test: Log Validator 
 
 class TestLogValidator:
 
@@ -414,7 +417,7 @@ class TestLogValidator:
                 assert not gap_results[0].passed
 
 
-# ── Test: Flight Phase Detection ──────────────────────────────
+#  Test: Flight Phase Detection 
 
 class TestFlightPhaseDetection:
 

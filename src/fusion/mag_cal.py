@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-# Magnetometer Auto-Calibrator (RLS)
-#
-# Real-time estimation of Hard-Iron (bias) and Soft-Iron (scale/skew)
-# distortions using Recursive Least Squares (RLS) on the algebraic
-# ellipsoid equation.
+# mag_cal.py module.
+# Does exactly what you think it does.
 
 import numpy as np
 import scipy.linalg as la

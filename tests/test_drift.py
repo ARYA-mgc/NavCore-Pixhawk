@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# test_drift.py module.
+# Does exactly what you think it does.
+
 """Long-duration drift tests.
 
 Default tests use 30-60s simulations (fast, ~5s each).
@@ -69,7 +72,7 @@ def make_eskf():
     return eskf, noise
 
 
-# ── Pure IMU Drift (no aiding) ────────────────────────────────
+#  Pure IMU Drift (no aiding) 
 
 class TestPureIMUDrift:
 
@@ -110,7 +113,7 @@ class TestPureIMUDrift:
         assert np.linalg.norm(eskf.x[0:3]) < 1e8
 
 
-# ── Aided Drift (baro + mag only) ────────────────────────────
+#  Aided Drift (baro + mag only) 
 
 class TestAidedDrift:
 
@@ -151,7 +154,7 @@ class TestAidedDrift:
         assert abs(eskf.x[2]) < 10.0
 
 
-# ── Full Aiding (GPS + baro + mag) ────────────────────────────
+#  Full Aiding (GPS + baro + mag) 
 
 class TestFullyAidedDrift:
 
@@ -206,7 +209,7 @@ class TestFullyAidedDrift:
         assert np.linalg.norm(eskf.x[0:3]) < 20.0
 
 
-# ── Temperature Drift ─────────────────────────────────────────
+#  Temperature Drift 
 
 class TestTemperatureDrift:
 

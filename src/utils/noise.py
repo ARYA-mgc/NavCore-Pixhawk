@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# sensor noise numbers — how noisy is your hardware?
+# noise.py module.
+# Does exactly what you think it does.
 
 import yaml
 import os
