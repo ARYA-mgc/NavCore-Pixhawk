@@ -830,11 +830,11 @@ class ESKF:
                 log.warning(f"{source} IEKF: non-PD S at iteration {iteration}")
                 break
 
-            # Gating on first iteration only
-            if iteration == 0:
+            # Gating on first two iterations
+            if iteration <= 1:
                 nis = float(y @ la.cho_solve(c_and_lower, y))
                 if nis > chi2_thresh:
-                    log.debug(f"{source} IEKF rejected: NIS={nis:.2f} > {chi2_thresh}")
+                    log.debug(f"{source} IEKF rejected at iter {iteration}: NIS={nis:.2f} > {chi2_thresh}")
                     break
 
             # Kalman gain and correction
@@ -844,8 +844,6 @@ class ESKF:
             # Check convergence
             if np.linalg.norm(dx) < tol:
                 accepted = True
-                # Apply final correction
-                self._inject_error(dx)
                 # Joseph form covariance update + Re-Cholesky
                 I_KH = np.eye(ERROR_DIM) - K @ H
                 P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
@@ -922,16 +920,6 @@ class ESKF:
         if np.any(np.isnan(self.U)) or np.any(np.isinf(self.U)):
             self._health = EKFHealth.FAULT
             log.critical("ESKF FAULT: NaN/Inf in covariance U")
-            return
-
-        # Condition number (periodic)
-        try:
-            cond_num = np.linalg.cond(P)
-            if cond_num > 1e12:
-                log.warning(f"Covariance poorly conditioned: {cond_num:.2e}")
-        except np.linalg.LinAlgError:
-            self._health = EKFHealth.FAULT
-            log.critical("ESKF FAULT: Covariance singular")
             return
 
         # Fault conditions

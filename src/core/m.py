@@ -142,6 +142,7 @@ class INSNavSys:
 
         # Let the config override our careful defaults (what could go wrong?)
         self.IMU_WATCHDOG_S = self.params["SENS_TIMEOUT"]
+        self._emergency_land_triggered = False
 
         self.lidar_radar = LidarRadarFusion(voxel_size=self.params["LR_VOX"], rdr_reject=self.params["RDR_REJECT"])
         self.ml_predictor = MLAnomalyDetector(contamination=self.params["ML_CONTAM"])
@@ -404,13 +405,11 @@ class INSNavSys:
                 
                 # Finally: which way are we pointing? (the eternal question)
                 yaw_rad = math.atan2(cmy, cmx)
-                if yaw_rad < 0:
-                    yaw_rad += 2 * math.pi
                     
-                if self.params.get("MAG_3D", False):
+                if self.params.get("MAG_3D", 0.0) > 0.5:
                     mag_norm = np.linalg.norm(cal_m)
                 else:
-                    mag_norm = np.sqrt(cmx**2 + cmy**2 + cmz**2)
+                    mag_norm = np.sqrt(cmx**2 + cmy**2)
 
                 self.mht.update_mag(yaw_rad, mag_norm=mag_norm,
                                t_now=t_now)
@@ -628,23 +627,23 @@ class INSNavSys:
                         # Apply the VIO update at the correct historical moment
                         result = self.vio.process_vio_update(t_meas, pos_vio, quat_vio, confidence)
                         if result is not None:
-                            self.eskf.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
-                            self.eskf.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
+                            self.mht.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
+                            self.mht.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
                             self._vio_count += 1
                         
                         # Fast-forward back to now with corrected trajectory
                         for i in range(replay_idx, len(self._oosm_buffer)):
                             _, _, _, a, g, dt_hist = self._oosm_buffer[i]
                             self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
-                            self.eskf.predict(a, g, dt_hist)
+                            self.mht.predict(a, g, dt_hist)
                 else:
                     # No time-travel? Fine, just nudge VIO position by velocity × latency
                     v_ned = self.eskf.x[3:6]
                     pos_vio_adj = pos_vio + v_ned * latency_s
                     result = self.vio.process_vio_update(t_now, pos_vio_adj, quat_vio, confidence)
                     if result is not None:
-                        self.eskf.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
-                        self.eskf.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
+                        self.mht.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
+                        self.mht.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
                         self._vio_count += 1
 
         # ── Safety & Health (the parental controls for the filter) ─────────

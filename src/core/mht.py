@@ -80,9 +80,11 @@ class MHTManager:
             self.shadow = copy.deepcopy(self.primary)
             self.shadow_spawn_time = t_now
             
-            # Inflate position and velocity covariance via Square-Root factor (U)
-            self.shadow.U[0:3, 0:3] = np.eye(3) * 100.0  # 100m uncertainty (P = U^T U)
-            self.shadow.U[3:6, 3:6] = np.eye(3) * 10.0   # 10m/s uncertainty
+            # Inflate position and velocity covariance via full P matrix
+            P_new = self.shadow.P
+            P_new[0:3, 0:3] += np.eye(3) * (100.0 ** 2)  # 100m uncertainty (variance)
+            P_new[3:6, 3:6] += np.eye(3) * (10.0 ** 2)   # 10m/s uncertainty (variance)
+            self.shadow.P = P_new
             
             # Force accept the jumped GPS in the shadow
             self.shadow.update_gps(lat, lon, alt, hdop, force_accept=True)
