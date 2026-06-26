@@ -1,0 +1,26 @@
+# config/noise_params.yaml
+# ─────────────────────────────────────────────────────────────
+# Sensor noise configuration for Pixhawk Cube Orange
+# Edit these values after running IMU calibration in Mission Planner.
+#
+# Tuning rules (from imu_noise_params.m comments):
+#   - Position drifts vertically  → decrease baro.std
+#   - Yaw oscillates              → increase mag.std
+#   - Position drifts overall     → decrease imu.accel_std
+#   - Attitude drifts             → decrease imu.gyro_std
+# ─────────────────────────────────────────────────────────────
+
+imu:
+  # ICM-42688-P on Cube Orange
+  accel_std:      0.05     # m/s²   accelerometer white noise σ
+  accel_bias_std: 0.02     # m/s²   bias instability
+  gyro_std:       0.005    # rad/s  gyroscope white noise σ
+  gyro_bias_std:  0.001    # rad/s  bias instability
+
+baro:
+  # MS5611-01BA03
+  std:  0.30               # m      altitude noise (RMS under vibration)
+
+mag:
+  # RM3100 external magnetometer
+  std:  0.02               # rad    (~1.1°) yaw noise after calibration

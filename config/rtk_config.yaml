@@ -1,0 +1,55 @@
+# config/rtk_config.yaml
+# ─────────────────────────────────────────────────────────────
+# RTK Ground Truth Collection Configuration
+# For u-blox F9P + NavCore-Pixhawk validation flights
+#
+# Connection priority:
+#   1. Direct UART → best latency, recommended
+#   2. USB         → plug-and-play, no wiring
+#   3. MAVLink     → if F9P routes through Pixhawk (rare)
+# ─────────────────────────────────────────────────────────────
+
+rtk:
+  # ── F9P Connection ──────────────────────────────────────────
+  # Set to "auto" to try /dev/ttyAMA1, /dev/ttyACM0, etc.
+  # Or specify exact device: "/dev/ttyAMA1", "/dev/ttyACM0", "COM3"
+  connection: "auto"
+
+  # Auto-detect search order (used when connection: "auto")
+  auto_detect_devices:
+    - "/dev/ttyAMA1"    # UART4 on RPi4 (direct wiring)
+    - "/dev/ttyACM0"    # USB (u-blox default)
+    - "/dev/ttyACM1"    # USB fallback
+    - "/dev/ttyUSB0"    # USB-serial adapter
+
+  uart_baud: 115200       # F9P UART baud rate (default for direct UART)
+  output_rate_hz: 5       # NAV-PVT / NAV-HPPOSLLH output rate
+
+  # ── Ground Truth Quality Thresholds ─────────────────────────
+  # Fix type: 0=none, 2=2D, 3=3D, 4=RTK_FLOAT, 5=RTK_FIXED
+  min_fix_type: 5         # 5 = RTK_FIXED required for ground truth (±2cm)
+  max_hacc_m: 0.05        # reject fixes with horizontal accuracy > 5cm
+  max_vacc_m: 0.10        # reject fixes with vertical accuracy > 10cm
+
+ntrip:
+  # ── NTRIP Correction Source ─────────────────────────────────
+  # Without corrections: F9P gives ~1.5m accuracy (not useful as ground truth)
+  # With corrections:    F9P gives ~2cm accuracy ✅
+  #
+  # Free casters:
+  #   - rtk2go.com (community, many mountpoints worldwide)
+  #   - UNAVCO (academic, US-focused)
+  enabled: true
+  caster: "rtk2go.com"
+  port: 2101
+  mountpoint: "YOUR_MOUNT"   # ← CHANGE THIS to your nearest mountpoint
+  username: ""               # often blank for rtk2go.com
+  password: ""
+  gga_interval_s: 10.0       # send GGA to caster every N seconds (for VRS)
+  reconnect_max_s: 30.0      # max backoff between reconnect attempts
+
+recording:
+  # ── Flight Data Recording ───────────────────────────────────
+  output_dir: "flight_data"
+  auto_record_on_arm: true    # start recording when drone arms
+  flush_interval_s: 1.0       # flush CSV buffers to disk every N seconds

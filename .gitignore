@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+ins-venv/
+venv/
+.venv/
+
+# Logs
+logs/*.csv
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

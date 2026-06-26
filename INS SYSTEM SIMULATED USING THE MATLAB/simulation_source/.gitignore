@@ -1,0 +1,22 @@
+# MATLAB
+*.asv
+*.m~
+*.mex*
+*.mlapp
+*.mlx
+*.slx
+*.fig
+octave-workspace
+
+# Generated outputs
+results/*.png
+results/*.mat
+results/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
