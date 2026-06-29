@@ -88,7 +88,7 @@ class ESKF:
         self._mag_reject_until = 0.0
         self._calibrated_mag_norm = 0.5
         self._mag_consecutive_good = 0
-        self._mag_required_good = 10
+        self._mag_required_good = 3
         self._gps_origin = None
         self._innovation_stats = {"baro": [], "mag": []}
         self._sensor_rejections = {}
@@ -438,6 +438,8 @@ class ESKF:
         automatically estimates and tracks it with proper covariance.
         No more EMA hack.
         """
+        if not self._initialized:
+            return
         # Predicted measurement: z_pred = pos_z + baro_bias
         # (baro measures altitude + bias)
         z_pred = np.array([self.x[2] + self.x[BARO_BIAS_IDX]])
@@ -484,6 +486,8 @@ class ESKF:
     def update_mag(self, yaw_measured: float, mag_norm: float = -1.0,
                    t_now: float = 0.0):
         """Magnetometer yaw update with 3-tier rejection."""
+        if not self._initialized:
+            return
         # Tier 1: field norm check
         if mag_norm > 0:
             norm_ratio = abs(mag_norm / self._calibrated_mag_norm - 1.0)
@@ -584,6 +588,10 @@ class ESKF:
         # v_body = R_dcm.T @ v_ned
         H_flow = np.zeros((2, ERROR_DIM))
         H_flow[:, 3:6] = R_dcm.T[0:2, :]  # vx, vy in body frame
+
+        # Attitude coupling: d(R^T v)/d(theta) = -[R^T v]_x
+        v_body = R_dcm.T @ v_ned
+        H_flow[:, E_ATT] = -self._skew(v_body)[0:2, :]
 
         R_base = 0.5 ** 2
         R_flow = np.eye(2) * (R_base * 100.0 / max(quality, 1))
@@ -719,7 +727,9 @@ class ESKF:
 
         if not force_accept and nis > chi2_thresh:
             if _reacquire:
-                if self._sensor_rejections.get(src, 0) >= 5:
+                count = self._sensor_rejections.get(src, 0) + 1
+                self._sensor_rejections[src] = count
+                if count >= 5:
                     log.warning(
                         f"RAIM FAULT: {src} rejected 5 times consecutively. Marked UNHEALTHY."
                     )

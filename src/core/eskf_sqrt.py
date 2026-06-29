@@ -189,6 +189,7 @@ class SquareRootESKF(ESKF):
 
         # Sequential scalar measurement processing (Potter's method)
         S_work = self.S.copy()
+        dx_total = np.zeros(ERROR_DIM)
 
         for i in range(m):
             h_i = H[i, :]  # (ERROR_DIM,)
@@ -206,39 +207,19 @@ class SquareRootESKF(ESKF):
             # Kalman gain (in square-root form)
             K = S_work @ f / alpha
 
-            # Update state
-            self.x[POS] += K[E_POS] * y[i]
-            self.x[VEL] += K[E_VEL] * y[i]
-
-            # Attitude correction
-            dtheta = K[E_ATT] * y[i]
-            dq = np.array([1.0, dtheta[0]/2, dtheta[1]/2, dtheta[2]/2])
-            dq /= np.linalg.norm(dq)
-            self.x[QUAT] = self._quat_mult(self.x[QUAT], dq)
-            self.x[QUAT] /= np.linalg.norm(self.x[QUAT])
-
-            # Bias and extended state corrections
-            self.x[ABIAS] += K[E_ABIAS] * y[i]
-            self.x[GBIAS] += K[E_GBIAS] * y[i]
-            self.x[BARO_BIAS_IDX] += K[E_BARO_BIAS] * y[i]
-            self.x[CLK_BIAS_IDX] += K[E_CLK_BIAS] * y[i]
-            self.x[CLK_DRIFT_IDX] += K[E_CLK_DRIFT] * y[i]
-            self.x[WIND] += K[E_WIND] * y[i]
+            # Accumulate correction into single error-state vector
+            dx_total += K * y[i]
 
             # Square-root covariance update (rank-1 downdate)
             beta = 1.0 / (1.0 + math.sqrt(r_i / alpha))
             S_work = S_work - beta * np.outer(K, f)
 
-        # Apply clamping
-        self.x[ABIAS] = np.clip(self.x[ABIAS],
-                                -self.ACCEL_BIAS_LIMIT, self.ACCEL_BIAS_LIMIT)
-        self.x[GBIAS] = np.clip(self.x[GBIAS],
-                                -self.GYRO_BIAS_LIMIT, self.GYRO_BIAS_LIMIT)
-        self.x[BARO_BIAS_IDX] = np.clip(self.x[BARO_BIAS_IDX],
-                                        -self.BARO_BIAS_LIMIT, self.BARO_BIAS_LIMIT)
-        self.x[WIND] = np.clip(self.x[WIND], -self.WIND_LIMIT, self.WIND_LIMIT)
+        # Apply accumulated correction through proper error injection
+        self._inject_error(dx_total)
 
         self.S = S_work
+        # Keep U in sync with S for any parent methods that read it
+        self.U = S_work.T
         return True
 
     def _harden_covariance(self):
