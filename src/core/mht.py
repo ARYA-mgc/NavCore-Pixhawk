@@ -117,7 +117,28 @@ class MHTManager:
         # Not using force_accept here because this handles generic external inputs
         self.primary.update_external(z, z_pred, H, R, source=source)
         if self.shadow:
-            self.shadow.update_external(z, z_pred, H, R, source=source)
+            # Recompute z_pred from shadow's own state to avoid stale prediction
+            # H maps error-state, but z_pred should reflect shadow's nominal state
+            # For position observations: z_pred = shadow.x[POS] (H selects pos)
+            # Generic approach: recompute from shadow state using same H mapping
+            from core.eskf import POS, VEL
+            shadow_z_pred = np.zeros_like(z_pred)
+            # Reconstruct predicted measurement from shadow state
+            # For position-type obs (H selects error-state pos/vel), map to nominal
+            for row in range(H.shape[0]):
+                for col in range(min(H.shape[1], 6)):  # pos + vel states
+                    if H[row, col] != 0.0:
+                        shadow_z_pred[row] += H[row, col] * self.shadow.x[col]
+                # If H references higher states (baro bias etc.), add those
+                if H.shape[1] > 6:
+                    for col in range(6, H.shape[1]):
+                        if H[row, col] != 0.0:
+                            # Map error-state index to nominal-state index
+                            if col < 9:  # attitude (error idx 6-8)
+                                pass  # attitude obs handled via yaw
+                            elif col == 15:  # baro bias
+                                shadow_z_pred[row] += H[row, col] * self.shadow.x[16]
+            self.shadow.update_external(z, shadow_z_pred, H, R, source=source)
 
     def scale_process_noise(self, vib_level: float):
         self.primary.scale_process_noise(vib_level)

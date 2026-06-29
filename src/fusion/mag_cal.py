@@ -107,16 +107,21 @@ class MagAutoCalibrator:
             pass
             
     def apply(self, mx: float, my: float, mz: float) -> np.ndarray:
-        """Apply the live calibration to a raw reading. Returns calibrated 3D vector."""
+        """Apply the live calibration to a raw reading. Returns calibrated 3D vector.
+
+        Preserves the original field magnitude so that downstream norm-based
+        rejection (ESKF Tier 1 mag check) continues to work correctly.
+        The W matrix maps to a unit sphere; we rescale back to the raw norm.
+        """
         raw = np.array([mx, my, mz])
         if not self.calibrated:
             return raw
-        # Normalizes the vector onto a unit sphere. 
-        # Typically we want Earth's magnetic field magnitude (~0.5 Gauss), 
-        # but unit sphere is fine if the filter expects unit vectors or estimates mag norm.
-        # Let's preserve the original norm magnitude approximately by scaling back.
-        # Wait, if we just want the calibrated vector, the ellipsoid gives norm = 1.
-        # We can just return the unit vector scaled by a standard Earth norm (e.g. 0.5 Gauss) 
-        # OR we just let it be unit vector.
-        return self.W @ (raw - self.bias)
+        corrected = self.W @ (raw - self.bias)
+        # Preserve original field magnitude: rescale corrected (unit-sphere)
+        # vector to match the raw input's magnitude.
+        corrected_norm = np.linalg.norm(corrected)
+        raw_norm = np.linalg.norm(raw)
+        if corrected_norm > 1e-10:
+            corrected = corrected * (raw_norm / corrected_norm)
+        return corrected
 

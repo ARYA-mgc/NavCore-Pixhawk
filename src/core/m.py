@@ -403,8 +403,15 @@ class INSNavSys:
                 cal_m = self.mag_cal.apply(mx, my, mz)
                 cmx, cmy, cmz = cal_m[0], cal_m[1], cal_m[2]
                 
-                # Finally: which way are we pointing? (the eternal question)
-                yaw_rad = math.atan2(cmy, cmx)
+                # Tilt-compensated yaw: project mag into horizontal plane
+                # using current roll/pitch from the ESKF state
+                euler = self.eskf.state["euler"]
+                roll_c, pitch_c = euler[0], euler[1]
+                cr, sr = math.cos(roll_c), math.sin(roll_c)
+                cp, sp = math.cos(pitch_c), math.sin(pitch_c)
+                mag_x_h = cmx * cp + cmy * sr * sp + cmz * cr * sp
+                mag_y_h = cmy * cr - cmz * sr
+                yaw_rad = math.atan2(-mag_y_h, mag_x_h)
                     
                 if self.params.get("MAG_3D", 0.0) > 0.5:
                     mag_norm = np.linalg.norm(cal_m)
@@ -458,7 +465,7 @@ class INSNavSys:
                         self.mht.update_gps(lat, lon, alt, hdop=hdop, t_now=t_meas)
                         
                         # Step 4: fast-forward back to present with corrected history
-                        for i in range(replay_idx, len(self._oosm_buffer)):
+                        for i in range(replay_idx + 1, len(self._oosm_buffer)):
                             _, _, _, a, g, dt_hist = self._oosm_buffer[i]
                             # Overwrite history with the new, less-wrong version
                             self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
@@ -632,7 +639,7 @@ class INSNavSys:
                             self._vio_count += 1
                         
                         # Fast-forward back to now with corrected trajectory
-                        for i in range(replay_idx, len(self._oosm_buffer)):
+                        for i in range(replay_idx + 1, len(self._oosm_buffer)):
                             _, _, _, a, g, dt_hist = self._oosm_buffer[i]
                             self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
                             self.mht.predict(a, g, dt_hist)

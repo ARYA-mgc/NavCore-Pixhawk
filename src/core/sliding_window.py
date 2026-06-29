@@ -9,6 +9,8 @@ from typing import Optional, List, Tuple
 from collections import deque
 from dataclasses import dataclass, field
 
+GRAVITY_NED = np.array([0.0, 0.0, 9.80665])
+
 log = logging.getLogger("sliding_window")
 
 
@@ -312,11 +314,15 @@ class SlidingWindowOptimizer:
         H_rm = -info
         H_rr = info
 
-        # Residual computation
+        # Residual computation (with gravity and frame rotation)
         second = self._keyframes[1]
-        r_p = (second.position - oldest.position -
-               oldest.velocity * preint.dt_sum) - preint.delta_p
-        r_v = (second.velocity - oldest.velocity) - preint.delta_v
+        R_i = self._quat_to_dcm(oldest.quaternion)
+        dt_sq = preint.dt_sum ** 2
+        r_p = (second.position - oldest.position
+               - oldest.velocity * preint.dt_sum
+               - 0.5 * GRAVITY_NED * dt_sq) - R_i @ preint.delta_p
+        r_v = (second.velocity - oldest.velocity
+               - GRAVITY_NED * preint.dt_sum) - R_i @ preint.delta_v
         # Simplified rotation residual (small angle approximation)
         dq = self._quat_mult(self._quat_inv(oldest.quaternion), second.quaternion)
         r_q = 2.0 * dq[1:4] - 2.0 * preint.delta_q[1:4]  # approximate
@@ -396,10 +402,14 @@ class SlidingWindowOptimizer:
                 if preint is None or preint.n_samples == 0:
                     continue
 
-                # Preintegration residual
-                r_p = (kf_j.position - kf_i.position -
-                       kf_i.velocity * preint.dt_sum) - preint.delta_p
-                r_v = (kf_j.velocity - kf_i.velocity) - preint.delta_v
+                # Preintegration residual (with gravity and frame rotation)
+                R_i = self._quat_to_dcm(kf_i.quaternion)
+                dt_sq = preint.dt_sum ** 2
+                r_p = (kf_j.position - kf_i.position
+                       - kf_i.velocity * preint.dt_sum
+                       - 0.5 * GRAVITY_NED * dt_sq) - R_i @ preint.delta_p
+                r_v = (kf_j.velocity - kf_i.velocity
+                       - GRAVITY_NED * preint.dt_sum) - R_i @ preint.delta_v
                 dq = self._quat_mult(self._quat_inv(kf_i.quaternion),
                                      kf_j.quaternion)
                 r_q = 2.0 * dq[1:4] - 2.0 * preint.delta_q[1:4]
