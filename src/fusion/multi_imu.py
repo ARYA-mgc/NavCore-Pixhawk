@@ -20,8 +20,8 @@ class IMUChannel:
         self.alive = False
 
         # Rolling variance for quality weighting
-        self._accel_history = deque(maxlen=window_size)
-        self._gyro_history = deque(maxlen=window_size)
+        self._accel_history = deque(maxlen=window_size)  # type: ignore
+        self._gyro_history = deque(maxlen=window_size)  # type: ignore
         self.accel_var = 0.0
         self.gyro_var = 0.0
 
@@ -41,10 +41,12 @@ class IMUChannel:
         self._gyro_history.append(gyro.copy())
 
         if len(self._accel_history) >= 10:
-            self.accel_var = float(np.var(
-                np.linalg.norm(np.array(self._accel_history), axis=1)))
-            self.gyro_var = float(np.var(
-                np.linalg.norm(np.array(self._gyro_history), axis=1)))
+            self.accel_var = float(
+                np.var(np.linalg.norm(np.array(self._accel_history), axis=1))
+            )
+            self.gyro_var = float(
+                np.var(np.linalg.norm(np.array(self._gyro_history), axis=1))
+            )
 
     @property
     def is_healthy(self) -> bool:
@@ -54,8 +56,10 @@ class IMUChannel:
         self.fault_count += 1
         if self.fault_count > 20:
             self._healthy = False
-            log.warning(f"IMU channel {self.channel_id} marked UNHEALTHY "
-                        f"({self.fault_count} faults)")
+            log.warning(
+                f"IMU channel {self.channel_id} marked UNHEALTHY "
+                f"({self.fault_count} faults)"
+            )
 
     def mark_good(self):
         # Slow recovery — need many good readings to re-enable
@@ -77,7 +81,7 @@ class MultiIMUFusion:
     """
 
     # Maximum age before an IMU channel is considered stale
-    MAX_AGE_S = 0.1   # 100ms
+    MAX_AGE_S = 0.1  # 100ms
 
     # Outlier threshold: if an IMU disagrees by this much, flag it
     OUTLIER_THRESHOLD = 2.0  # m/s² for accel, rad/s for gyro
@@ -89,8 +93,7 @@ class MultiIMUFusion:
         self._confidence = 0.0
         self._n_active = 0
 
-    def update_imu(self, channel: int, accel: np.ndarray,
-                   gyro: np.ndarray, t: float):
+    def update_imu(self, channel: int, accel: np.ndarray, gyro: np.ndarray, t: float):
         """Feed a raw IMU reading from a specific channel.
 
         Args:
@@ -144,15 +147,17 @@ class MultiIMUFusion:
             if accel_dev > self.OUTLIER_THRESHOLD or gyro_dev > self.OUTLIER_THRESHOLD:
                 ch.mark_fault()
                 weights.append(0.0)
-                log.debug(f"IMU{ch.channel_id} outlier: "
-                          f"accel_dev={accel_dev:.2f} gyro_dev={gyro_dev:.4f}")
+                log.debug(
+                    f"IMU{ch.channel_id} outlier: "
+                    f"accel_dev={accel_dev:.2f} gyro_dev={gyro_dev:.4f}"
+                )
             else:
                 ch.mark_good()
                 # Inverse variance weighting (lower variance = higher trust)
                 var = max(ch.accel_var + ch.gyro_var, 1e-6)
                 weights.append(1.0 / var)
 
-        weights = np.array(weights)
+        weights = np.array(weights)  # type: ignore
         weight_sum = np.sum(weights)
 
         if weight_sum < 1e-10:

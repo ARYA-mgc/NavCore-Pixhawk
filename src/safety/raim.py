@@ -5,7 +5,7 @@
 import math
 import logging
 import numpy as np
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from enum import Enum, auto
 from collections import deque
 
@@ -14,14 +14,16 @@ log = logging.getLogger("raim")
 
 class IntegrityStatus(Enum):
     """Navigation integrity status."""
-    AVAILABLE = auto()      # PL < AL, navigation usable
-    CAUTION = auto()        # PL approaching AL (80-100%)
+
+    AVAILABLE = auto()  # PL < AL, navigation usable
+    CAUTION = auto()  # PL approaching AL (80-100%)
     NOT_AVAILABLE = auto()  # PL > AL, navigation unsafe
-    FAULT_DETECTED = auto() # RAIM fault detection triggered
+    FAULT_DETECTED = auto()  # RAIM fault detection triggered
 
 
 class MissionPhase(Enum):
     """Mission phases with different alert limits."""
+
     TAKEOFF = auto()
     CRUISE = auto()
     APPROACH = auto()
@@ -31,11 +33,11 @@ class MissionPhase(Enum):
 
 # Alert limits per mission phase (meters)
 ALERT_LIMITS = {
-    MissionPhase.TAKEOFF:  {"horizontal": 5.0,  "vertical": 3.0},
-    MissionPhase.CRUISE:   {"horizontal": 15.0, "vertical": 10.0},
-    MissionPhase.APPROACH: {"horizontal": 3.0,  "vertical": 2.0},
-    MissionPhase.LANDING:  {"horizontal": 1.5,  "vertical": 1.0},
-    MissionPhase.HOVER:    {"horizontal": 2.0,  "vertical": 1.5},
+    MissionPhase.TAKEOFF: {"horizontal": 5.0, "vertical": 3.0},
+    MissionPhase.CRUISE: {"horizontal": 15.0, "vertical": 10.0},
+    MissionPhase.APPROACH: {"horizontal": 3.0, "vertical": 2.0},
+    MissionPhase.LANDING: {"horizontal": 1.5, "vertical": 1.0},
+    MissionPhase.HOVER: {"horizontal": 2.0, "vertical": 1.5},
 }
 
 # Integrity risk probability (P_md = missed detection probability)
@@ -51,12 +53,12 @@ class ProtectionLevel:
     """Computed protection level output."""
 
     def __init__(self):
-        self.hpl = float('inf')      # Horizontal Protection Level (m)
-        self.vpl = float('inf')      # Vertical Protection Level (m)
-        self.hal = float('inf')      # Horizontal Alert Limit (m)
-        self.val = float('inf')      # Vertical Alert Limit (m)
-        self.hpl_ratio = float('inf')  # HPL/HAL — must be < 1.0
-        self.vpl_ratio = float('inf')  # VPL/VAL — must be < 1.0
+        self.hpl = float("inf")  # Horizontal Protection Level (m)
+        self.vpl = float("inf")  # Vertical Protection Level (m)
+        self.hal = float("inf")  # Horizontal Alert Limit (m)
+        self.val = float("inf")  # Vertical Alert Limit (m)
+        self.hpl_ratio = float("inf")  # HPL/HAL — must be < 1.0
+        self.vpl_ratio = float("inf")  # VPL/VAL — must be < 1.0
         self.integrity = IntegrityStatus.NOT_AVAILABLE
         self.n_sources = 0
         self.fault_detected = False
@@ -65,8 +67,7 @@ class ProtectionLevel:
 
     @property
     def is_available(self) -> bool:
-        return self.integrity in (IntegrityStatus.AVAILABLE,
-                                  IntegrityStatus.CAUTION)
+        return self.integrity in (IntegrityStatus.AVAILABLE, IntegrityStatus.CAUTION)
 
     def to_dict(self) -> dict:
         return {
@@ -135,8 +136,7 @@ class RAIMMonitor:
             log.info(f"RAIM mission phase: {self._mission_phase.name} → {phase.name}")
             self._mission_phase = phase
 
-    def auto_detect_phase(self, alt_agl: float, vel_horiz: float,
-                          vel_vert: float):
+    def auto_detect_phase(self, alt_agl: float, vel_horiz: float, vel_vert: float):
         """Automatically detect mission phase from flight state."""
         if alt_agl < 0.5 and vel_horiz < 0.3:
             self.set_mission_phase(MissionPhase.HOVER)
@@ -151,9 +151,9 @@ class RAIMMonitor:
         else:
             self.set_mission_phase(MissionPhase.CRUISE)
 
-    def compute_protection_level(self, P: np.ndarray,
-                                 innovation_sources: Optional[Dict[str, dict]] = None
-                                 ) -> ProtectionLevel:
+    def compute_protection_level(
+        self, P: np.ndarray, innovation_sources: Optional[Dict[str, dict]] = None
+    ) -> ProtectionLevel:
         """Compute protection levels from ESKF covariance.
 
         Args:
@@ -184,15 +184,15 @@ class RAIMMonitor:
             max_eigval_h = max(eigvals_h)
             pl.hpl = self.K_MD * math.sqrt(max(max_eigval_h, 0.0))
         except np.linalg.LinAlgError:
-            pl.hpl = float('inf')
+            pl.hpl = float("inf")
 
         # Vertical PL: uses Down position variance
         vpl_var = pos_cov[2, 2]
         pl.vpl = self.K_MD * math.sqrt(max(vpl_var, 0.0))
 
         # ── Compute ratios ────────────────────────────────────
-        pl.hpl_ratio = pl.hpl / pl.hal if pl.hal > 0 else float('inf')
-        pl.vpl_ratio = pl.vpl / pl.val if pl.val > 0 else float('inf')
+        pl.hpl_ratio = pl.hpl / pl.hal if pl.hal > 0 else float("inf")
+        pl.vpl_ratio = pl.vpl / pl.val if pl.val > 0 else float("inf")
 
         # ── Fault Detection and Exclusion (FDE) ───────────────
         if innovation_sources and len(innovation_sources) >= self.MIN_SOURCES_FOR_FDE:
@@ -206,12 +206,16 @@ class RAIMMonitor:
         if pl.fault_detected:
             pl.integrity = IntegrityStatus.FAULT_DETECTED
             self._fault_count += 1
-            log.error(f"RAIM FAULT DETECTED: source={pl.fault_source} "
-                      f"T={pl.test_statistic:.2f}")
+            log.error(
+                f"RAIM FAULT DETECTED: source={pl.fault_source} "
+                f"T={pl.test_statistic:.2f}"
+            )
         elif pl.hpl_ratio > 1.0 or pl.vpl_ratio > 1.0:
             pl.integrity = IntegrityStatus.NOT_AVAILABLE
-            log.warning(f"RAIM NOT AVAILABLE: HPL={pl.hpl:.2f}m > HAL={pl.hal:.1f}m "
-                        f"or VPL={pl.vpl:.2f}m > VAL={pl.val:.1f}m")
+            log.warning(
+                f"RAIM NOT AVAILABLE: HPL={pl.hpl:.2f}m > HAL={pl.hal:.1f}m "
+                f"or VPL={pl.vpl:.2f}m > VAL={pl.val:.1f}m"
+            )
         elif pl.hpl_ratio > self.CAUTION_RATIO or pl.vpl_ratio > self.CAUTION_RATIO:
             pl.integrity = IntegrityStatus.CAUTION
         else:
@@ -276,17 +280,19 @@ class RAIMMonitor:
 
         if detected and per_source_nis:
             # Identify the worst source
-            worst = max(per_source_nis, key=per_source_nis.get)
-            result["source"] = worst
+            worst = max(per_source_nis, key=per_source_nis.get)  # type: ignore
+            result["source"] = worst  # type: ignore
             result["worst_nis"] = per_source_nis[worst]
-            log.warning(f"RAIM FDE: worst source = {worst} "
-                        f"(NIS/DOF = {per_source_nis[worst]:.2f})")
+            log.warning(
+                f"RAIM FDE: worst source = {worst} "
+                f"(NIS/DOF = {per_source_nis[worst]:.2f})"
+            )
 
         return result
 
-    def compute_exclusion_pl(self, P: np.ndarray,
-                             sources: Dict[str, dict],
-                             exclude: str) -> ProtectionLevel:
+    def compute_exclusion_pl(
+        self, P: np.ndarray, sources: Dict[str, dict], exclude: str
+    ) -> ProtectionLevel:
         """Compute protection level with one source excluded.
 
         Used after fault detection to verify that excluding the faulty

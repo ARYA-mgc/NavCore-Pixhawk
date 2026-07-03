@@ -45,29 +45,51 @@ class FlightRecorder:
         "baro_log": ["time_s", "alt_m"],
         "mag_log": ["time_s", "mx", "my", "mz"],
         "rtk_ground_truth": [
-            "time_s", "x_m", "y_m", "z_m",
-            "vx_mps", "vy_mps", "vz_mps",
-            "qw", "qx", "qy", "qz",
-            "fix_type", "h_acc_m", "v_acc_m", "n_sats",
+            "time_s",
+            "x_m",
+            "y_m",
+            "z_m",
+            "vx_mps",
+            "vy_mps",
+            "vz_mps",
+            "qw",
+            "qx",
+            "qy",
+            "qz",
+            "fix_type",
+            "h_acc_m",
+            "v_acc_m",
+            "n_sats",
         ],
         "eskf_state": [
             "time_s",
-            "px_m", "py_m", "pz_m",
-            "vx_ms", "vy_ms", "vz_ms",
-            "qw", "qx", "qy", "qz",
-            "ba_x", "ba_y", "ba_z",
-            "bg_x", "bg_y", "bg_z",
-            "health", "P_trace",
+            "px_m",
+            "py_m",
+            "pz_m",
+            "vx_ms",
+            "vy_ms",
+            "vz_ms",
+            "qw",
+            "qx",
+            "qy",
+            "qz",
+            "ba_x",
+            "ba_y",
+            "ba_z",
+            "bg_x",
+            "bg_y",
+            "bg_z",
+            "health",
+            "P_trace",
             "baro_bias",
         ],
     }
 
-    def __init__(self, output_dir: str = "flight_data",
-                 flush_interval_s: float = 1.0):
+    def __init__(self, output_dir: str = "flight_data", flush_interval_s: float = 1.0):
         self._base_dir = output_dir
         self._flush_interval = flush_interval_s
         self._session_dir: Optional[str] = None
-        self._writers: Dict[str, csv.writer] = {}
+        self._writers: Dict[str, csv.writer] = {}  # type: ignore
         self._files: Dict[str, Any] = {}
         self._buffers: Dict[str, list] = {}
         self._counts: Dict[str, int] = {}
@@ -169,43 +191,62 @@ class FlightRecorder:
         if not self._recording:
             return
         t_rel = self._relative_time(t)
-        self._buffer_row("imu_log", [
-            f"{t_rel:.4f}",
-            f"{accel[0]:.6f}", f"{accel[1]:.6f}", f"{accel[2]:.6f}",
-            f"{gyro[0]:.6f}", f"{gyro[1]:.6f}", f"{gyro[2]:.6f}",
-        ])
+        self._buffer_row(
+            "imu_log",
+            [
+                f"{t_rel:.4f}",
+                f"{accel[0]:.6f}",
+                f"{accel[1]:.6f}",
+                f"{accel[2]:.6f}",
+                f"{gyro[0]:.6f}",
+                f"{gyro[1]:.6f}",
+                f"{gyro[2]:.6f}",
+            ],
+        )
 
-    def record_gps(self, t: float, north: float, east: float,
-                   down: float, hdop: float):
+    def record_gps(self, t: float, north: float, east: float, down: float, hdop: float):
         """Record GPS measurement in NED (5 Hz)."""
         if not self._recording:
             return
         t_rel = self._relative_time(t)
-        self._buffer_row("gps_log", [
-            f"{t_rel:.4f}",
-            f"{north:.4f}", f"{east:.4f}", f"{down:.4f}",
-            f"{hdop:.2f}",
-        ])
+        self._buffer_row(
+            "gps_log",
+            [
+                f"{t_rel:.4f}",
+                f"{north:.4f}",
+                f"{east:.4f}",
+                f"{down:.4f}",
+                f"{hdop:.2f}",
+            ],
+        )
 
     def record_baro(self, t: float, alt_m: float):
         """Record barometric altitude (25 Hz)."""
         if not self._recording:
             return
         t_rel = self._relative_time(t)
-        self._buffer_row("baro_log", [
-            f"{t_rel:.4f}",
-            f"{alt_m:.4f}",
-        ])
+        self._buffer_row(
+            "baro_log",
+            [
+                f"{t_rel:.4f}",
+                f"{alt_m:.4f}",
+            ],
+        )
 
     def record_mag(self, t: float, mx: float, my: float, mz: float):
         """Record magnetometer measurement in body frame (10 Hz)."""
         if not self._recording:
             return
         t_rel = self._relative_time(t)
-        self._buffer_row("mag_log", [
-            f"{t_rel:.4f}",
-            f"{mx:.6f}", f"{my:.6f}", f"{mz:.6f}",
-        ])
+        self._buffer_row(
+            "mag_log",
+            [
+                f"{t_rel:.4f}",
+                f"{mx:.6f}",
+                f"{my:.6f}",
+                f"{mz:.6f}",
+            ],
+        )
 
     def record_rtk(self, t: float, fix):
         """Record RTK ground truth fix (5 Hz, only RTK_FIXED).
@@ -222,21 +263,35 @@ class FlightRecorder:
         # In practice, use ESKF attitude for ground truth orientation
         qw, qx, qy, qz = 1.0, 0.0, 0.0, 0.0
 
-        self._buffer_row("rtk_ground_truth", [
-            f"{t_rel:.4f}",
-            f"{fix.pos_ned[0]:.6f}", f"{fix.pos_ned[1]:.6f}",
-            f"{fix.pos_ned[2]:.6f}",
-            f"{fix.vel_ned[0]:.4f}", f"{fix.vel_ned[1]:.4f}",
-            f"{fix.vel_ned[2]:.4f}",
-            f"{qw:.6f}", f"{qx:.6f}", f"{qy:.6f}", f"{qz:.6f}",
-            f"{fix.fix_type}",
-            f"{fix.h_acc_m:.4f}", f"{fix.v_acc_m:.4f}",
-            f"{fix.n_sats}",
-        ])
+        self._buffer_row(
+            "rtk_ground_truth",
+            [
+                f"{t_rel:.4f}",
+                f"{fix.pos_ned[0]:.6f}",
+                f"{fix.pos_ned[1]:.6f}",
+                f"{fix.pos_ned[2]:.6f}",
+                f"{fix.vel_ned[0]:.4f}",
+                f"{fix.vel_ned[1]:.4f}",
+                f"{fix.vel_ned[2]:.4f}",
+                f"{qw:.6f}",
+                f"{qx:.6f}",
+                f"{qy:.6f}",
+                f"{qz:.6f}",
+                f"{fix.fix_type}",
+                f"{fix.h_acc_m:.4f}",
+                f"{fix.v_acc_m:.4f}",
+                f"{fix.n_sats}",
+            ],
+        )
 
-    def record_eskf_state(self, t: float, state: dict,
-                          P: np.ndarray, health_name: str,
-                          baro_bias: float = 0.0):
+    def record_eskf_state(
+        self,
+        t: float,
+        state: dict,
+        P: np.ndarray,
+        health_name: str,
+        baro_bias: float = 0.0,
+    ):
         """Record ESKF state output (50 Hz)."""
         if not self._recording:
             return
@@ -247,18 +302,31 @@ class FlightRecorder:
         ba = state["accel_bias"]
         bg = state["gyro_bias"]
 
-        self._buffer_row("eskf_state", [
-            f"{t_rel:.4f}",
-            f"{pos[0]:.6f}", f"{pos[1]:.6f}", f"{pos[2]:.6f}",
-            f"{vel[0]:.4f}", f"{vel[1]:.4f}", f"{vel[2]:.4f}",
-            f"{quat[0]:.6f}", f"{quat[1]:.6f}",
-            f"{quat[2]:.6f}", f"{quat[3]:.6f}",
-            f"{ba[0]:.6f}", f"{ba[1]:.6f}", f"{ba[2]:.6f}",
-            f"{bg[0]:.6f}", f"{bg[1]:.6f}", f"{bg[2]:.6f}",
-            health_name,
-            f"{np.trace(P):.4f}",
-            f"{baro_bias:.6f}",
-        ])
+        self._buffer_row(
+            "eskf_state",
+            [
+                f"{t_rel:.4f}",
+                f"{pos[0]:.6f}",
+                f"{pos[1]:.6f}",
+                f"{pos[2]:.6f}",
+                f"{vel[0]:.4f}",
+                f"{vel[1]:.4f}",
+                f"{vel[2]:.4f}",
+                f"{quat[0]:.6f}",
+                f"{quat[1]:.6f}",
+                f"{quat[2]:.6f}",
+                f"{quat[3]:.6f}",
+                f"{ba[0]:.6f}",
+                f"{ba[1]:.6f}",
+                f"{ba[2]:.6f}",
+                f"{bg[0]:.6f}",
+                f"{bg[1]:.6f}",
+                f"{bg[2]:.6f}",
+                health_name,
+                f"{np.trace(P):.4f}",
+                f"{baro_bias:.6f}",
+            ],
+        )
 
     # ── Buffering & Flush ─────────────────────────────────────
 

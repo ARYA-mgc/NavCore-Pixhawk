@@ -36,10 +36,11 @@ def make_eskf():
 class TestRTKStateTransitions:
     """Simulate RTK fix quality transitions and verify ESKF adapts."""
 
-    def _simulate_gps_quality(self, eskf, noise, rng, n_steps, hdop,
-                              pos_std_m, dt=0.01):
+    def _simulate_gps_quality(
+        self, eskf, noise, rng, n_steps, hdop, pos_std_m, dt=0.01
+    ):
         """Run GPS updates with specified quality level.
-        
+
         Args:
             hdop: HDOP value (1.0 = RTK fixed, 2.0 = float, 5.0 = standalone)
             pos_std_m: position noise standard deviation
@@ -52,17 +53,19 @@ class TestRTKStateTransitions:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                dt
+                dt,
             )
             # GPS at 5 Hz
             if i % 20 == 0:
                 lat_noise = rng.normal(0, pos_std_m / 111320.0)
-                lon_noise = rng.normal(0, pos_std_m / (111320.0 * math.cos(math.radians(true_lat))))
+                lon_noise = rng.normal(
+                    0, pos_std_m / (111320.0 * math.cos(math.radians(true_lat)))
+                )
                 eskf.update_gps(
                     true_lat + lat_noise,
                     true_lon + lon_noise,
                     true_alt + rng.normal(0, pos_std_m * 2),
-                    hdop=hdop
+                    hdop=hdop,
                 )
             # Baro
             if i % 4 == 0:
@@ -81,12 +84,18 @@ class TestRTKStateTransitions:
 
         # Warm-up with GPS (10s) — filter converges
         for i in range(1000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 20 == 0:
-                eskf.update_gps(true_lat + rng.normal(0, 2e-6),
-                                true_lon + rng.normal(0, 2e-6),
-                                true_alt + rng.normal(0, 1.0), hdop=1.5)
+                eskf.update_gps(
+                    true_lat + rng.normal(0, 2e-6),
+                    true_lon + rng.normal(0, 2e-6),
+                    true_alt + rng.normal(0, 1.0),
+                    hdop=1.5,
+                )
             if i % 4 == 0:
                 eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
             if i % 10 == 0:
@@ -94,12 +103,15 @@ class TestRTKStateTransitions:
 
         # Brief GPS gap (5s) — covariance grows
         for i in range(500):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 4 == 0:
                 eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
 
-        pos_cov_no_fix = np.trace(eskf.P[0:2, 0:2])
+        np.trace(eskf.P[0:2, 0:2])
 
         # Phase 2: Float RTK (20s, HDOP 2.0, ~1m accuracy)
         self._simulate_gps_quality(eskf, noise, rng, 2000, hdop=2.0, pos_std_m=1.0)
@@ -110,8 +122,9 @@ class TestRTKStateTransitions:
         pos_cov_fixed = np.trace(eskf.P[0:2, 0:2])
 
         # Fixed should be better than float
-        assert pos_cov_fixed < pos_cov_float, \
+        assert pos_cov_fixed < pos_cov_float, (
             f"Fixed RTK should reduce uncertainty (float={pos_cov_float:.4f}, fixed={pos_cov_fixed:.4f})"
+        )
 
         # Final position error should be bounded
         pos_error = np.linalg.norm(eskf.x[0:3])
@@ -131,12 +144,13 @@ class TestRTKStateTransitions:
         pos_cov_float = np.trace(eskf.P[0:2, 0:2])
 
         # Covariance should have grown
-        assert pos_cov_float > pos_cov_fixed, \
+        assert pos_cov_float > pos_cov_fixed, (
             "Position uncertainty should increase when RTK degrades to Float"
+        )
 
     def test_rtcm_stream_interruption(self):
         """Simulate RTCM stream loss: RTK Fixed → slowly degrades → Float.
-        
+
         When RTCM corrections stop, the F9P gradually loses its RTK fix.
         The ESKF should handle the increasing HDOP gracefully.
         """
@@ -163,7 +177,7 @@ class TestRTKStateTransitions:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
             if i % 20 == 0:
                 lat_noise = rng.normal(0, current_pos_std / 111320.0)
@@ -172,7 +186,7 @@ class TestRTKStateTransitions:
                     true_lat + lat_noise,
                     true_lon + lon_noise,
                     true_alt + rng.normal(0, current_pos_std * 2),
-                    hdop=current_hdop
+                    hdop=current_hdop,
                 )
                 hdop_history.append(current_hdop)
 
@@ -183,8 +197,9 @@ class TestRTKStateTransitions:
         assert eskf.health != EKFHealth.FAULT
         # Position error should have grown but not exploded
         pos_error = np.linalg.norm(eskf.x[0:3])
-        assert pos_error < 20.0, \
+        assert pos_error < 20.0, (
             f"RTCM loss: position error={pos_error:.1f}m (should be <20m)"
+        )
 
     def test_rtk_reacquisition_after_rtcm_loss(self):
         """After RTCM stream resumes, RTK should re-converge."""
@@ -203,11 +218,13 @@ class TestRTKStateTransitions:
         pos_error_reacquired = np.linalg.norm(eskf.x[0:3])
 
         # Should have recovered
-        assert pos_error_reacquired < pos_error_standalone, \
-            f"RTK re-acquisition should improve accuracy "  \
+        assert pos_error_reacquired < pos_error_standalone, (
+            f"RTK re-acquisition should improve accuracy "
             f"(was {pos_error_standalone:.2f}m, now {pos_error_reacquired:.2f}m)"
-        assert pos_error_reacquired < 1.0, \
+        )
+        assert pos_error_reacquired < 1.0, (
             f"RTK re-acquisition error: {pos_error_reacquired:.3f}m"
+        )
 
 
 class TestRTKConvergence:
@@ -228,7 +245,7 @@ class TestRTKConvergence:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
             if i % 20 == 0:  # 5 Hz GPS
                 gps_epochs += 1
@@ -236,7 +253,7 @@ class TestRTKConvergence:
                     true_lat + rng.normal(0, 2e-6),
                     true_lon + rng.normal(0, 2e-6),
                     true_alt + rng.normal(0, 1.0),
-                    hdop=1.0
+                    hdop=1.0,
                 )
                 pos_error = np.linalg.norm(eskf.x[0:3])
                 if pos_error < 1.0 and not converged:
@@ -250,8 +267,9 @@ class TestRTKConvergence:
 
         assert converged, f"Filter did not converge to <1m in {gps_epochs} GPS epochs"
         # Should converge within 50 epochs (10 seconds at 5 Hz)
-        assert gps_epochs < 50, \
+        assert gps_epochs < 50, (
             f"Convergence took {gps_epochs} GPS epochs (expected <50)"
+        )
 
 
 if __name__ == "__main__":

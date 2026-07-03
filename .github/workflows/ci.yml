@@ -1,0 +1,89 @@
+name: NavCore-Pixhawk CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  python-lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff mypy pytest numpy scipy
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Lint with Ruff & Mypy
+      run: |
+        ruff check src/ tests/
+        mypy src/ --ignore-missing-imports
+        
+    - name: Run Python Unit Tests (incl. NEES/NIS Parity)
+      run: |
+        pytest -m "not slow" tests/
+
+  cpp-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libeigen3-dev cppcheck clang-tidy
+        
+    - name: Run Cppcheck & Clang-Tidy (Static Analysis)
+      run: |
+        cppcheck --enable=all --inconclusive --std=c++17 cpp_port/src cpp_port/include
+        
+    - name: Build C++ Port
+      run: |
+        mkdir -p cpp_port/build
+        cd cpp_port/build
+        cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        make -j$(nproc)
+        
+    - name: Run Clang-Tidy
+      run: |
+        # Run clang-tidy on the generated compile_commands.json
+        cd cpp_port/build
+        run-clang-tidy -p . -header-filter=.* ../src/.*
+        
+    - name: Run C++ Unit Tests
+      run: |
+        cd cpp_port/build
+        ctest --output-on-failure
+
+  docs-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install Doc Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y doxygen graphviz
+        pip install sphinx sphinx_rtd_theme
+        
+    - name: Build Doxygen (C++)
+      run: |
+        doxygen Doxyfile
+        
+    - name: Build Sphinx (Python)
+      run: |
+        cd doc && make html

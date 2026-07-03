@@ -14,13 +14,14 @@ log = logging.getLogger("landing_detect")
 @dataclass
 class LandingCandidate:
     """A potential emergency landing site."""
-    position: np.ndarray       # NED center position (m)
-    roughness: float           # surface roughness RMS (m) — lower = flatter
-    slope_deg: float           # surface slope (degrees) — lower = better
-    area_m2: float             # estimated area (m²) — larger = safer
-    distance: float            # distance from current position (m)
-    score: float               # composite score (higher = better)
-    n_points: int              # number of lidar points in this cell
+
+    position: np.ndarray  # NED center position (m)
+    roughness: float  # surface roughness RMS (m) — lower = flatter
+    slope_deg: float  # surface slope (degrees) — lower = better
+    area_m2: float  # estimated area (m²) — larger = safer
+    distance: float  # distance from current position (m)
+    score: float  # composite score (higher = better)
+    n_points: int  # number of lidar points in this cell
 
     def to_dict(self) -> dict:
         return {
@@ -68,10 +69,10 @@ class EmergencyLandingDetector:
     MAX_SEARCH_RADIUS = 50.0
 
     # Scoring weights
-    W_ROUGHNESS = 0.30   # lower roughness = higher score
-    W_SLOPE = 0.25       # lower slope = higher score
-    W_AREA = 0.15        # larger area = higher score
-    W_DISTANCE = 0.30    # closer = higher score
+    W_ROUGHNESS = 0.30  # lower roughness = higher score
+    W_SLOPE = 0.25  # lower slope = higher score
+    W_AREA = 0.15  # larger area = higher score
+    W_DISTANCE = 0.30  # closer = higher score
 
     def __init__(self):
         self._last_candidates: List[LandingCandidate] = []
@@ -88,9 +89,9 @@ class EmergencyLandingDetector:
     def has_safe_site(self) -> bool:
         return self._best_site is not None and self._best_site.score > 0.5
 
-    def analyze_point_cloud(self, points: np.ndarray,
-                            current_pos: np.ndarray,
-                            current_alt_agl: float) -> List[LandingCandidate]:
+    def analyze_point_cloud(
+        self, points: np.ndarray, current_pos: np.ndarray, current_alt_agl: float
+    ) -> List[LandingCandidate]:
         """Analyze a lidar point cloud for safe landing zones.
 
         Args:
@@ -117,8 +118,8 @@ class EmergencyLandingDetector:
 
         # Filter by search radius
         horiz_dist = np.sqrt(
-            (pts_ned[:, 0] - current_pos[0]) ** 2 +
-            (pts_ned[:, 1] - current_pos[1]) ** 2
+            (pts_ned[:, 0] - current_pos[0]) ** 2
+            + (pts_ned[:, 1] - current_pos[1]) ** 2
         )
         in_range = horiz_dist < self.MAX_SEARCH_RADIUS
         pts_ned = pts_ned[in_range]
@@ -136,17 +137,20 @@ class EmergencyLandingDetector:
         if candidates:
             self._best_site = candidates[0]
             if self._best_site.score > 0.5:
-                log.debug(f"Landing site found: score={self._best_site.score:.2f} "
-                          f"dist={self._best_site.distance:.1f}m "
-                          f"rough={self._best_site.roughness:.3f}m "
-                          f"slope={self._best_site.slope_deg:.1f}°")
+                log.debug(
+                    f"Landing site found: score={self._best_site.score:.2f} "
+                    f"dist={self._best_site.distance:.1f}m "
+                    f"rough={self._best_site.roughness:.3f}m "
+                    f"slope={self._best_site.slope_deg:.1f}°"
+                )
         else:
             self._best_site = None
 
         return candidates
 
-    def _grid_analysis(self, pts_ned: np.ndarray,
-                       current_pos: np.ndarray) -> List[LandingCandidate]:
+    def _grid_analysis(
+        self, pts_ned: np.ndarray, current_pos: np.ndarray
+    ) -> List[LandingCandidate]:
         """Divide point cloud into grid cells and analyze each."""
         candidates = []
 
@@ -169,10 +173,10 @@ class EmergencyLandingDetector:
 
                 # Points in this cell
                 mask = (
-                    (pts_ned[:, 0] >= cell_n_min) &
-                    (pts_ned[:, 0] < cell_n_max) &
-                    (pts_ned[:, 1] >= cell_e_min) &
-                    (pts_ned[:, 1] < cell_e_max)
+                    (pts_ned[:, 0] >= cell_n_min)
+                    & (pts_ned[:, 0] < cell_n_max)
+                    & (pts_ned[:, 1] >= cell_e_min)
+                    & (pts_ned[:, 1] < cell_e_max)
                 )
                 cell_pts = pts_ned[mask]
 
@@ -190,31 +194,35 @@ class EmergencyLandingDetector:
                     continue
 
                 # Cell center
-                center = np.array([
-                    (cell_n_min + cell_n_max) / 2.0,
-                    (cell_e_min + cell_e_max) / 2.0,
-                    np.mean(cell_pts[:, 2]),
-                ])
+                center = np.array(
+                    [
+                        (cell_n_min + cell_n_max) / 2.0,
+                        (cell_e_min + cell_e_max) / 2.0,
+                        np.mean(cell_pts[:, 2]),
+                    ]
+                )
 
                 # Distance from current position
                 dist = np.linalg.norm(center[0:2] - current_pos[0:2])
 
                 # Estimated area (cell coverage based on point density)
                 coverage = min(cell_pts.shape[0] / 50.0, 1.0)
-                area = self.CELL_SIZE ** 2 * coverage
+                area = self.CELL_SIZE**2 * coverage
 
                 # Score the candidate
-                score = self._compute_score(roughness, slope_deg, area, dist)
+                score = self._compute_score(roughness, slope_deg, area, dist)  # type: ignore
 
-                candidates.append(LandingCandidate(
-                    position=center,
-                    roughness=roughness,
-                    slope_deg=slope_deg,
-                    area_m2=area,
-                    distance=dist,
-                    score=score,
-                    n_points=cell_pts.shape[0],
-                ))
+                candidates.append(
+                    LandingCandidate(
+                        position=center,
+                        roughness=roughness,
+                        slope_deg=slope_deg,
+                        area_m2=area,
+                        distance=dist,  # type: ignore
+                        score=score,
+                        n_points=cell_pts.shape[0],
+                    )
+                )
 
         return candidates
 
@@ -244,7 +252,7 @@ class EmergencyLandingDetector:
 
         # Roughness: RMS of distances from the fitted plane
         distances = centered @ normal
-        roughness = float(np.sqrt(np.mean(distances ** 2)))
+        roughness = float(np.sqrt(np.mean(distances**2)))
 
         # Slope: angle between surface normal and vertical (NED down = [0,0,-1])
         vertical = np.array([0.0, 0.0, -1.0])
@@ -254,8 +262,9 @@ class EmergencyLandingDetector:
 
         return roughness, slope_deg, normal
 
-    def _compute_score(self, roughness: float, slope_deg: float,
-                       area: float, distance: float) -> float:
+    def _compute_score(
+        self, roughness: float, slope_deg: float, area: float, distance: float
+    ) -> float:
         """Compute a composite landing site score (0.0 = worst, 1.0 = best).
 
         Score components:
@@ -277,10 +286,12 @@ class EmergencyLandingDetector:
         s_dist = max(0.0, 1.0 - distance / self.MAX_SEARCH_RADIUS)
 
         # Weighted composite
-        score = (self.W_ROUGHNESS * s_rough +
-                 self.W_SLOPE * s_slope +
-                 self.W_AREA * s_area +
-                 self.W_DISTANCE * s_dist)
+        score = (
+            self.W_ROUGHNESS * s_rough
+            + self.W_SLOPE * s_slope
+            + self.W_AREA * s_area
+            + self.W_DISTANCE * s_dist
+        )
 
         return float(score)
 

@@ -2,7 +2,9 @@
 # test_fail.py module.
 # Does exactly what you think it does.
 
-import sys, os
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import math
@@ -31,7 +33,6 @@ def run_predict_steps(eskf, n=100, dt=0.01):
 
 
 class TestSensorDropout:
-
     def test_baro_dropout_10s(self, eskf):
         # can it fly blind for 10 seconds without baro? let's see
         run_predict_steps(eskf, 1000, 0.01)  # 10s of IMU only
@@ -43,7 +44,7 @@ class TestSensorDropout:
         yaw_var_before = eskf.P[8, 8]
         run_predict_steps(eskf, 3000, 0.01)
         yaw_var_after = eskf.P[8, 8]
-        
+
         # Without any corrections, yaw uncertainty WILL grow significantly.
         # This is correct physical behavior.
         assert yaw_var_after > yaw_var_before * 10.0
@@ -63,7 +64,6 @@ class TestSensorDropout:
 
 
 class TestNoiseSikes:
-
     def test_accel_noise_spike(self, eskf):
         # blast it with noise, it should tank it
         accel_normal = np.array([0.0, 0.0, -9.80665])
@@ -96,7 +96,6 @@ class TestNoiseSikes:
 
 
 class TestMagDisturbance:
-
     def test_mag_field_doubled_rejected(self, eskf):
         # someone put a magnet nearby, filter should bail
         run_predict_steps(eskf, 100)
@@ -115,7 +114,6 @@ class TestMagDisturbance:
 
 
 class TestBiasExplosion:
-
     def test_large_bias_clamped(self, eskf):
         # force huge biases, they should get clamped
         eskf.x[10:13] = [5.0, 5.0, 5.0]  # way over limit
@@ -126,10 +124,9 @@ class TestBiasExplosion:
 
 
 class TestCovarianceHealth:
-
     def test_nan_detection(self, eskf):
         # inject NaN, should immediately go FAULT
-        eskf.x[0] = float('nan')
+        eskf.x[0] = float("nan")
         eskf._check_health()
         assert eskf.health == EKFHealth.FAULT
 
@@ -143,7 +140,6 @@ class TestCovarianceHealth:
 
 
 class TestQuaternionMath:
-
     def test_identity_quaternion(self, eskf):
         q = np.array([1.0, 0.0, 0.0, 0.0])
         R = eskf._quat_to_dcm(q)
@@ -165,7 +161,7 @@ class TestQuaternionMath:
 
     def test_90deg_rotations(self, eskf):
         # 90 deg around Z axis
-        q = eskf._euler_to_quat(0, 0, math.pi/2)
+        q = eskf._euler_to_quat(0, 0, math.pi / 2)
         R = eskf._quat_to_dcm(q)
         v_body = np.array([1, 0, 0])
         v_ned = R @ v_body
@@ -185,7 +181,6 @@ class TestQuaternionMath:
 
 
 class TestJacobianValidation:
-
     def test_F_analytical_vs_numerical(self, eskf):
         # math check: does our jacobian match numerical differentiation?
         accel = np.array([0.1, -0.2, -9.8])
@@ -211,7 +206,7 @@ class TestJacobianValidation:
             eskf.x = x0.copy()
             eskf.P = P0.copy()
             eskf._inject_error(dx_plus)
-            x_plus = eskf.x.copy()
+            eskf.x.copy()
             eskf.predict(accel + x0[10:13], gyro + x0[13:16], dt)
             f_plus = eskf.x[:6].copy()
 
@@ -227,8 +222,7 @@ class TestJacobianValidation:
             eskf.P = P0.copy()
 
         # Check position and velocity blocks (most critical)
-        max_err = np.max(np.abs(
-            F_analytical[:6, :6] - F_numerical[:6, :6]))
+        max_err = np.max(np.abs(F_analytical[:6, :6] - F_numerical[:6, :6]))
         # Relaxed tolerance due to numerical differentiation noise
         assert max_err < 0.1, f"Jacobian error too large: {max_err}"
 

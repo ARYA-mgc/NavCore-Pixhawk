@@ -5,8 +5,7 @@
 import os
 import yaml
 import logging
-from dataclasses import dataclass, fields
-from typing import Optional
+from dataclasses import dataclass
 
 log = logging.getLogger("config_loader")
 
@@ -17,6 +16,7 @@ class ConfigError(Exception):
 
 
 # ── Schema Definition ──────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class _Bound:
@@ -30,24 +30,30 @@ class _Bound:
 # Full schema: section -> field -> bounds
 _SCHEMA = {
     "imu": {
-        "accel_std":        _Bound(0.001, 2.0,    True,  "Accelerometer white noise (m/s^2)"),
-        "accel_bias_std":   _Bound(0.0001, 1.0,   True,  "Accelerometer bias instability (m/s^2)"),
-        "accel_bias_tau":   _Bound(1.0, 10000.0,  False, "Accel bias correlation time (s)"),
-        "accel_bias_limit": _Bound(0.1, 10.0,     False, "Max accel bias clamp (m/s^2)"),
-        "gyro_std":         _Bound(0.0001, 0.5,   True,  "Gyroscope white noise (rad/s)"),
-        "gyro_bias_std":    _Bound(0.00001, 0.1,  True,  "Gyroscope bias instability (rad/s)"),
-        "gyro_bias_tau":    _Bound(1.0, 10000.0,  False, "Gyro bias correlation time (s)"),
-        "gyro_bias_limit":  _Bound(0.01, 1.0,     False, "Max gyro bias clamp (rad/s)"),
+        "accel_std": _Bound(0.001, 2.0, True, "Accelerometer white noise (m/s^2)"),
+        "accel_bias_std": _Bound(
+            0.0001, 1.0, True, "Accelerometer bias instability (m/s^2)"
+        ),
+        "accel_bias_tau": _Bound(
+            1.0, 10000.0, False, "Accel bias correlation time (s)"
+        ),
+        "accel_bias_limit": _Bound(0.1, 10.0, False, "Max accel bias clamp (m/s^2)"),
+        "gyro_std": _Bound(0.0001, 0.5, True, "Gyroscope white noise (rad/s)"),
+        "gyro_bias_std": _Bound(
+            0.00001, 0.1, True, "Gyroscope bias instability (rad/s)"
+        ),
+        "gyro_bias_tau": _Bound(1.0, 10000.0, False, "Gyro bias correlation time (s)"),
+        "gyro_bias_limit": _Bound(0.01, 1.0, False, "Max gyro bias clamp (rad/s)"),
     },
     "baro": {
-        "std":              _Bound(0.01, 5.0,     True,  "Barometric altitude noise (m)"),
+        "std": _Bound(0.01, 5.0, True, "Barometric altitude noise (m)"),
     },
     "mag": {
-        "std":              _Bound(0.001, 0.5,    True,  "Magnetometer yaw noise (rad)"),
+        "std": _Bound(0.001, 0.5, True, "Magnetometer yaw noise (rad)"),
     },
     "gps": {
-        "pos_std":          _Bound(0.1, 50.0,     False, "GPS position noise (m)"),
-        "vel_std":          _Bound(0.01, 5.0,     False, "GPS velocity noise (m/s)"),
+        "pos_std": _Bound(0.1, 50.0, False, "GPS position noise (m)"),
+        "vel_std": _Bound(0.01, 5.0, False, "GPS velocity noise (m/s)"),
     },
 }
 
@@ -83,7 +89,9 @@ def load_config(path: str) -> dict:
             section_data = {}
 
         if not isinstance(section_data, dict):
-            errors.append(f"Section '{section}' must be a mapping, got {type(section_data).__name__}")
+            errors.append(
+                f"Section '{section}' must be a mapping, got {type(section_data).__name__}"
+            )
             continue
 
         # Reject unknown keys within each section
@@ -132,7 +140,9 @@ def load_config(path: str) -> dict:
         validated[section] = validated_section
 
     if errors:
-        msg = "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        msg = "Configuration validation failed:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
         log.critical(msg)
         raise ConfigError(msg)
 
@@ -147,4 +157,5 @@ def validate_or_die(path: str) -> dict:
     except ConfigError as e:
         log.critical(str(e))
         import sys
+
         sys.exit(1)

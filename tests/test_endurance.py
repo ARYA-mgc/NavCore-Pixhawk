@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from core.eskf import ESKF, EKFHealth
 from utils.noise import IMUNoiseParams
-from collections import deque
 
 GRAVITY = 9.80665
 
@@ -60,7 +59,7 @@ class TestMemoryStability:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
 
         gc.collect()
@@ -71,7 +70,7 @@ class TestMemoryStability:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
 
         gc.collect()
@@ -81,8 +80,9 @@ class TestMemoryStability:
         # but it should not be proportional to step count
         growth = obj_count_after - obj_count_before
         # Allow up to 500 objects of growth (Python internals, caches)
-        assert growth < 50000, \
+        assert growth < 50000, (
             f"Object count grew by {growth} during 10K predict steps — possible leak"
+        )
 
     def test_update_cycle_no_memory_growth(self):
         """Full predict+update cycle should not accumulate."""
@@ -93,8 +93,11 @@ class TestMemoryStability:
 
         # Warm up
         for i in range(1000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
@@ -104,22 +107,27 @@ class TestMemoryStability:
         obj_before = self._get_object_count()
 
         for i in range(5000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
                 eskf.update_mag(rng.normal(0, noise.mag_std))
             if i % 20 == 0:
-                eskf.update_gps(13.0827 + rng.normal(0, 2e-6),
-                                80.2707 + rng.normal(0, 2e-6),
-                                50.0 + rng.normal(0, 1.0), hdop=1.0)
+                eskf.update_gps(
+                    13.0827 + rng.normal(0, 2e-6),
+                    80.2707 + rng.normal(0, 2e-6),
+                    50.0 + rng.normal(0, 1.0),
+                    hdop=1.0,
+                )
 
         gc.collect()
         obj_after = self._get_object_count()
         growth = obj_after - obj_before
-        assert growth < 50000, \
-            f"Object count grew by {growth} during 5K update cycles"
+        assert growth < 50000, f"Object count grew by {growth} during 5K update cycles"
 
 
 class TestThreadSafety:
@@ -131,7 +139,7 @@ class TestThreadSafety:
 
         for _ in range(10):
             eskf, noise = make_eskf()
-            rng = np.random.default_rng(42)
+            np.random.default_rng(42)
             for i in range(100):
                 eskf.predict(np.array([0, 0, -GRAVITY]), np.zeros(3), 0.01)
             del eskf
@@ -153,18 +161,22 @@ class TestQueueBounds:
         gyro = np.zeros(3)
 
         for i in range(50000):  # 500 seconds
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
                 eskf.update_mag(rng.normal(0, noise.mag_std))
 
         # Check innovation stats aren't accumulating unbounded data
-        if hasattr(eskf, '_innovation_stats'):
+        if hasattr(eskf, "_innovation_stats"):
             for key, vals in eskf._innovation_stats.items():
-                assert len(vals) < 10000, \
+                assert len(vals) < 10000, (
                     f"Innovation stats '{key}' has {len(vals)} entries — unbounded"
+                )
 
     def test_state_history_not_stored(self):
         """ESKF should NOT store state history internally."""
@@ -174,14 +186,18 @@ class TestQueueBounds:
         size_before = sys.getsizeof(eskf.__dict__)
 
         for i in range(10000):
-            eskf.predict(np.array([0, 0, -GRAVITY]) + rng.normal(0, 0.05, 3),
-                         rng.normal(0, 0.005, 3), 0.01)
+            eskf.predict(
+                np.array([0, 0, -GRAVITY]) + rng.normal(0, 0.05, 3),
+                rng.normal(0, 0.005, 3),
+                0.01,
+            )
 
         size_after = sys.getsizeof(eskf.__dict__)
         # Dict size should not have grown significantly
         growth = size_after - size_before
-        assert growth < 10000, \
+        assert growth < 10000, (
             f"ESKF internal dict grew by {growth} bytes — possible state accumulation"
+        )
 
 
 class TestLongRunEndurance:
@@ -190,7 +206,7 @@ class TestLongRunEndurance:
     @pytest.mark.slow
     def test_1hour_simulated(self):
         """Simulate 1 hour of operation (accelerated).
-        
+
         Runs 360,000 steps at 100Hz = 1 hour.
         Verifies filter stays healthy and numerically stable.
         """
@@ -207,14 +223,14 @@ class TestLongRunEndurance:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
             if i % 20 == 0:
                 eskf.update_gps(
                     true_lat + rng.normal(0, 2e-6),
                     true_lon + rng.normal(0, 2e-6),
                     true_alt + rng.normal(0, 1.0),
-                    hdop=1.0
+                    hdop=1.0,
                 )
             if i % 4 == 0:
                 eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
@@ -236,7 +252,7 @@ class TestLongRunEndurance:
     @pytest.mark.slow
     def test_6hour_simulated(self):
         """Simulate 6 hours (2.16M steps).
-        
+
         Mark as slow — skip with: pytest -m "not slow"
         """
         eskf, noise = make_eskf()
@@ -249,14 +265,14 @@ class TestLongRunEndurance:
             eskf.predict(
                 accel + rng.normal(0, noise.accel_std, 3),
                 gyro + rng.normal(0, noise.gyro_std, 3),
-                0.01
+                0.01,
             )
             if i % 20 == 0:
                 eskf.update_gps(
                     true_lat + rng.normal(0, 2e-6),
                     true_lon + rng.normal(0, 2e-6),
                     true_alt + rng.normal(0, 1.0),
-                    hdop=1.0
+                    hdop=1.0,
                 )
             if i % 4 == 0:
                 eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))

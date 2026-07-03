@@ -5,9 +5,10 @@
 import logging
 import math
 import numpy as np
-from typing import Optional, List, Tuple
-from collections import deque
+from typing import Optional, List
 from dataclasses import dataclass, field
+
+GRAVITY_NED = np.array([0.0, 0.0, 9.80665])
 
 log = logging.getLogger("sliding_window")
 
@@ -24,10 +25,11 @@ class IMUPreintegration:
     Reference: Forster et al., "On-Manifold Preintegration for
     Real-Time Visual-Inertial Odometry" (2017)
     """
+
     # Preintegrated deltas
     delta_p: np.ndarray = field(default_factory=lambda: np.zeros(3))
     delta_v: np.ndarray = field(default_factory=lambda: np.zeros(3))
-    delta_q: np.ndarray = field(default_factory=lambda: np.array([1., 0., 0., 0.]))
+    delta_q: np.ndarray = field(default_factory=lambda: np.array([1.0, 0.0, 0.0, 0.0]))
 
     # Jacobians w.r.t. bias (for bias correction without re-integration)
     J_p_ba: np.ndarray = field(default_factory=lambda: np.zeros((3, 3)))
@@ -51,14 +53,15 @@ class IMUPreintegration:
 @dataclass
 class Keyframe:
     """A keyframe in the sliding window."""
+
     timestamp: float
-    position: np.ndarray       # NED (3,)
-    velocity: np.ndarray       # NED (3,)
-    quaternion: np.ndarray     # [w,x,y,z] (4,)
-    accel_bias: np.ndarray     # (3,)
-    gyro_bias: np.ndarray      # (3,)
+    position: np.ndarray  # NED (3,)
+    velocity: np.ndarray  # NED (3,)
+    quaternion: np.ndarray  # [w,x,y,z] (4,)
+    accel_bias: np.ndarray  # (3,)
+    gyro_bias: np.ndarray  # (3,)
     preintegration: Optional[IMUPreintegration] = None  # IMU to next keyframe
-    observations: list = field(default_factory=list)     # visual observations
+    observations: list = field(default_factory=list)  # visual observations
 
 
 class SlidingWindowOptimizer:
@@ -102,7 +105,7 @@ class SlidingWindowOptimizer:
         self._enabled = enable
         self._keyframes: List[Keyframe] = []
         self._prior_H: Optional[np.ndarray] = None  # marginalization prior Hessian
-        self._prior_b: Optional[np.ndarray] = None   # marginalization prior residual
+        self._prior_b: Optional[np.ndarray] = None  # marginalization prior residual
         self._prior_dim = 0
 
         # Current preintegration accumulator
@@ -114,8 +117,9 @@ class SlidingWindowOptimizer:
         self._optimization_count = 0
 
         if enable:
-            log.info(f"Sliding window optimizer enabled "
-                     f"(window={self.MAX_WINDOW_SIZE})")
+            log.info(
+                f"Sliding window optimizer enabled (window={self.MAX_WINDOW_SIZE})"
+            )
 
     @property
     def is_active(self) -> bool:
@@ -125,9 +129,14 @@ class SlidingWindowOptimizer:
     def window_size(self) -> int:
         return len(self._keyframes)
 
-    def integrate_imu(self, accel: np.ndarray, gyro: np.ndarray,
-                      dt: float, accel_bias: np.ndarray,
-                      gyro_bias: np.ndarray):
+    def integrate_imu(
+        self,
+        accel: np.ndarray,
+        gyro: np.ndarray,
+        dt: float,
+        accel_bias: np.ndarray,
+        gyro_bias: np.ndarray,
+    ):
         """Accumulate IMU measurement into preintegration.
 
         Called at IMU rate (100 Hz). Accumulates relative motion
@@ -159,7 +168,7 @@ class SlidingWindowOptimizer:
 
         # ── Update preintegrated states ────────────────────────
         # delta_p += delta_v * dt + 0.5 * R_k * a * dt²
-        preint.delta_p += preint.delta_v * dt + 0.5 * R_k @ a * dt ** 2
+        preint.delta_p += preint.delta_v * dt + 0.5 * R_k @ a * dt**2
 
         # delta_v += R_k * a * dt
         preint.delta_v += R_k @ a * dt
@@ -169,10 +178,14 @@ class SlidingWindowOptimizer:
         if angle > 1e-10:
             axis = w / np.linalg.norm(w)
             ha = angle / 2.0
-            dq = np.array([math.cos(ha),
-                           axis[0] * math.sin(ha),
-                           axis[1] * math.sin(ha),
-                           axis[2] * math.sin(ha)])
+            dq = np.array(
+                [
+                    math.cos(ha),
+                    axis[0] * math.sin(ha),
+                    axis[1] * math.sin(ha),
+                    axis[2] * math.sin(ha),
+                ]
+            )
         else:
             dq = np.array([1.0, 0.0, 0.0, 0.0])
         preint.delta_q = self._quat_mult(preint.delta_q, dq)
@@ -191,22 +204,22 @@ class SlidingWindowOptimizer:
         preint.J_v_bg += -R_k @ skew_a @ preint.J_q_bg * dt
 
         # J_p_ba += J_v_ba * dt - 0.5 * R_k * dt²
-        preint.J_p_ba += preint.J_v_ba * dt - 0.5 * R_k * dt ** 2
+        preint.J_p_ba += preint.J_v_ba * dt - 0.5 * R_k * dt**2
 
         # J_p_bg += J_v_bg * dt - 0.5 * R_k * skew(a) * J_q_bg * dt²
-        preint.J_p_bg += preint.J_v_bg * dt - 0.5 * R_k @ skew_a @ preint.J_q_bg * dt ** 2
+        preint.J_p_bg += preint.J_v_bg * dt - 0.5 * R_k @ skew_a @ preint.J_q_bg * dt**2
 
         # J_q_bg += -(I - skew(w*dt)) * J_q_bg - I * dt  (approximation)
         preint.J_q_bg = (np.eye(3) - skew_w * dt) @ preint.J_q_bg - np.eye(3) * dt
 
         # ── Update covariance ──────────────────────────────────
         # Noise injection into preintegration covariance
-        accel_var = 0.05 ** 2  # m/s² (from noise params)
-        gyro_var = 0.005 ** 2  # rad/s
+        accel_var = 0.05**2  # m/s² (from noise params)
+        gyro_var = 0.005**2  # rad/s
         Q_preint = np.zeros((9, 9))
-        Q_preint[0:3, 0:3] = np.eye(3) * accel_var * dt ** 2 * 0.25  # position noise
-        Q_preint[3:6, 3:6] = np.eye(3) * accel_var * dt               # velocity noise
-        Q_preint[6:9, 6:9] = np.eye(3) * gyro_var * dt                # rotation noise
+        Q_preint[0:3, 0:3] = np.eye(3) * accel_var * dt**2 * 0.25  # position noise
+        Q_preint[3:6, 3:6] = np.eye(3) * accel_var * dt  # velocity noise
+        Q_preint[6:9, 6:9] = np.eye(3) * gyro_var * dt  # rotation noise
 
         # State transition for covariance
         A = np.eye(9)
@@ -219,9 +232,15 @@ class SlidingWindowOptimizer:
         preint.dt_sum += dt
         preint.n_samples += 1
 
-    def add_keyframe(self, timestamp: float, position: np.ndarray,
-                     velocity: np.ndarray, quaternion: np.ndarray,
-                     accel_bias: np.ndarray, gyro_bias: np.ndarray):
+    def add_keyframe(
+        self,
+        timestamp: float,
+        position: np.ndarray,
+        velocity: np.ndarray,
+        quaternion: np.ndarray,
+        accel_bias: np.ndarray,
+        gyro_bias: np.ndarray,
+    ):
         """Add a new keyframe to the sliding window.
 
         Call this at keyframe rate (~10-20 Hz) from the VIO/SLAM pipeline.
@@ -235,8 +254,10 @@ class SlidingWindowOptimizer:
             return
 
         # Rate limiting
-        if (self._keyframes and
-                timestamp - self._keyframes[-1].timestamp < self.MIN_KEYFRAME_INTERVAL):
+        if (
+            self._keyframes
+            and timestamp - self._keyframes[-1].timestamp < self.MIN_KEYFRAME_INTERVAL
+        ):
             return
 
         # Attach preintegration to previous keyframe
@@ -262,8 +283,10 @@ class SlidingWindowOptimizer:
         if len(self._keyframes) > self.MAX_WINDOW_SIZE:
             self._marginalize_oldest()
 
-        log.debug(f"Keyframe {self._keyframe_count} added at t={timestamp:.2f}s, "
-                  f"window={len(self._keyframes)}")
+        log.debug(
+            f"Keyframe {self._keyframe_count} added at t={timestamp:.2f}s, "
+            f"window={len(self._keyframes)}"
+        )
 
     def _marginalize_oldest(self):
         """Marginalize the oldest keyframe using Schur complement.
@@ -312,11 +335,19 @@ class SlidingWindowOptimizer:
         H_rm = -info
         H_rr = info
 
-        # Residual computation
+        # Residual computation (with gravity and frame rotation)
         second = self._keyframes[1]
-        r_p = (second.position - oldest.position -
-               oldest.velocity * preint.dt_sum) - preint.delta_p
-        r_v = (second.velocity - oldest.velocity) - preint.delta_v
+        R_i = self._quat_to_dcm(oldest.quaternion)
+        dt_sq = preint.dt_sum**2
+        r_p = (
+            second.position
+            - oldest.position
+            - oldest.velocity * preint.dt_sum
+            - 0.5 * GRAVITY_NED * dt_sq
+        ) - R_i @ preint.delta_p
+        r_v = (
+            second.velocity - oldest.velocity - GRAVITY_NED * preint.dt_sum
+        ) - R_i @ preint.delta_v
         # Simplified rotation residual (small angle approximation)
         dq = self._quat_mult(self._quat_inv(oldest.quaternion), second.quaternion)
         r_q = 2.0 * dq[1:4] - 2.0 * preint.delta_q[1:4]  # approximate
@@ -346,8 +377,10 @@ class SlidingWindowOptimizer:
         self._keyframes.pop(0)
         self._marginalization_count += 1
 
-        log.debug(f"Marginalized keyframe, window={len(self._keyframes)}, "
-                  f"prior_dim={self._prior_dim}")
+        log.debug(
+            f"Marginalized keyframe, window={len(self._keyframes)}, "
+            f"prior_dim={self._prior_dim}"
+        )
 
     def get_correction(self) -> Optional[dict]:
         """Get state correction from sliding window optimization.
@@ -396,12 +429,19 @@ class SlidingWindowOptimizer:
                 if preint is None or preint.n_samples == 0:
                     continue
 
-                # Preintegration residual
-                r_p = (kf_j.position - kf_i.position -
-                       kf_i.velocity * preint.dt_sum) - preint.delta_p
-                r_v = (kf_j.velocity - kf_i.velocity) - preint.delta_v
-                dq = self._quat_mult(self._quat_inv(kf_i.quaternion),
-                                     kf_j.quaternion)
+                # Preintegration residual (with gravity and frame rotation)
+                R_i = self._quat_to_dcm(kf_i.quaternion)
+                dt_sq = preint.dt_sum**2
+                r_p = (
+                    kf_j.position
+                    - kf_i.position
+                    - kf_i.velocity * preint.dt_sum
+                    - 0.5 * GRAVITY_NED * dt_sq
+                ) - R_i @ preint.delta_p
+                r_v = (
+                    kf_j.velocity - kf_i.velocity - GRAVITY_NED * preint.dt_sum
+                ) - R_i @ preint.delta_v
+                dq = self._quat_mult(self._quat_inv(kf_i.quaternion), kf_j.quaternion)
                 r_q = 2.0 * dq[1:4] - 2.0 * preint.delta_q[1:4]
 
                 residual = np.concatenate([r_p, r_v, r_q])
@@ -414,26 +454,26 @@ class SlidingWindowOptimizer:
 
                 # Jacobians (simplified for pose-only)
                 J_i = -np.eye(9)  # d(residual)/d(state_i)
-                J_j = np.eye(9)   # d(residual)/d(state_j)
+                J_j = np.eye(9)  # d(residual)/d(state_j)
 
                 idx_i = i * 9
                 idx_j = (i + 1) * 9
 
                 # Hessian blocks
-                H_total[idx_i:idx_i+9, idx_i:idx_i+9] += J_i.T @ info @ J_i
-                H_total[idx_i:idx_i+9, idx_j:idx_j+9] += J_i.T @ info @ J_j
-                H_total[idx_j:idx_j+9, idx_i:idx_i+9] += J_j.T @ info @ J_i
-                H_total[idx_j:idx_j+9, idx_j:idx_j+9] += J_j.T @ info @ J_j
+                H_total[idx_i : idx_i + 9, idx_i : idx_i + 9] += J_i.T @ info @ J_i
+                H_total[idx_i : idx_i + 9, idx_j : idx_j + 9] += J_i.T @ info @ J_j
+                H_total[idx_j : idx_j + 9, idx_i : idx_i + 9] += J_j.T @ info @ J_i
+                H_total[idx_j : idx_j + 9, idx_j : idx_j + 9] += J_j.T @ info @ J_j
 
                 # Gradient
-                b_total[idx_i:idx_i+9] += J_i.T @ info @ residual
-                b_total[idx_j:idx_j+9] += J_j.T @ info @ residual
+                b_total[idx_i : idx_i + 9] += J_i.T @ info @ residual
+                b_total[idx_j : idx_j + 9] += J_j.T @ info @ residual
 
             # ── Marginalization prior ──────────────────────────
             if self._prior_H is not None:
                 pdim = self._prior_dim
                 H_total[0:pdim, 0:pdim] += self._prior_H
-                b_total[0:pdim] += self._prior_b
+                b_total[0:pdim] += self._prior_b  # type: ignore
 
             # ── Damping (Levenberg-Marquardt) ──────────────────
             damping = 1e-4
@@ -453,16 +493,18 @@ class SlidingWindowOptimizer:
             # Apply corrections to all keyframes
             for i in range(n):
                 idx = i * 9
-                self._keyframes[i].position += dx[idx:idx+3]
-                self._keyframes[i].velocity += dx[idx+3:idx+6]
+                self._keyframes[i].position += dx[idx : idx + 3]
+                self._keyframes[i].velocity += dx[idx + 3 : idx + 6]
 
-                dtheta = dx[idx+6:idx+9]
-                dq = np.array([1.0, dtheta[0]/2, dtheta[1]/2, dtheta[2]/2])
+                dtheta = dx[idx + 6 : idx + 9]
+                dq = np.array([1.0, dtheta[0] / 2, dtheta[1] / 2, dtheta[2] / 2])
                 dq /= np.linalg.norm(dq)
                 self._keyframes[i].quaternion = self._quat_mult(
-                    self._keyframes[i].quaternion, dq)
+                    self._keyframes[i].quaternion, dq
+                )
                 self._keyframes[i].quaternion /= np.linalg.norm(
-                    self._keyframes[i].quaternion)
+                    self._keyframes[i].quaternion
+                )
 
         # Return correction for the most recent keyframe
         latest = self._keyframes[-1]
@@ -480,12 +522,14 @@ class SlidingWindowOptimizer:
     def _quat_mult(q1, q2):
         w1, x1, y1, z1 = q1
         w2, x2, y2, z2 = q2
-        return np.array([
-            w1*w2 - x1*x2 - y1*y2 - z1*z2,
-            w1*x2 + x1*w2 + y1*z2 - z1*y2,
-            w1*y2 - x1*z2 + y1*w2 + z1*x2,
-            w1*z2 + x1*y2 - y1*x2 + z1*w2,
-        ])
+        return np.array(
+            [
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            ]
+        )
 
     @staticmethod
     def _quat_inv(q):
@@ -494,19 +538,23 @@ class SlidingWindowOptimizer:
     @staticmethod
     def _quat_to_dcm(q):
         w, x, y, z = q
-        return np.array([
-            [1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y)],
-            [2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x)],
-            [2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)],
-        ])
+        return np.array(
+            [
+                [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+                [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+            ]
+        )
 
     @staticmethod
     def _skew(v):
-        return np.array([
-            [0, -v[2], v[1]],
-            [v[2], 0, -v[0]],
-            [-v[1], v[0], 0],
-        ])
+        return np.array(
+            [
+                [0, -v[2], v[1]],
+                [v[2], 0, -v[0]],
+                [-v[1], v[0], 0],
+            ]
+        )
 
     def get_status(self) -> dict:
         return {

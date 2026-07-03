@@ -2,21 +2,24 @@
 # test_ins.py module.
 # Does exactly what you think it does.
 
-import sys, os
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import math
 import numpy as np
 import pytest
-from core.eskf        import ESKF, EKFHealth
-from utils.noise      import IMUNoiseParams
+from core.eskf import ESKF, EKFHealth
+from utils.noise import IMUNoiseParams
 from core.dr import DeadReckon
 
 
-#  fixtures 
+#  fixtures
 @pytest.fixture
 def noise():
     return IMUNoiseParams()
+
 
 @pytest.fixture
 def eskf(noise):
@@ -26,14 +29,14 @@ def eskf(noise):
     e._initialized = True
     return e
 
+
 @pytest.fixture
 def dr(noise):
     return DeadReckon(noise)
 
 
-#  ESKF tests 
+#  ESKF tests
 class TestESKF:
-
     def test_initial_quaternion_identity(self, eskf):
         # should start perfectly level and pointing north
         assert abs(eskf.x[6] - 1.0) < 1e-10
@@ -47,7 +50,7 @@ class TestESKF:
         # no sensor updates = growing uncertainty
         trace_before = np.trace(eskf.P)
         accel = np.array([0.0, 0.0, -9.80665])  # hovering
-        gyro  = np.zeros(3)
+        gyro = np.zeros(3)
         for _ in range(50):
             eskf.predict(accel, gyro, 0.01)
         trace_after = np.trace(eskf.P)
@@ -56,7 +59,7 @@ class TestESKF:
     def test_predict_gravity_stationary(self, eskf):
         # sitting still should mean staying at zero
         accel = np.array([0.0, 0.0, -9.80665])
-        gyro  = np.zeros(3)
+        gyro = np.zeros(3)
         for _ in range(100):
             eskf.predict(accel, gyro, 0.01)
         pos = eskf.state["pos"]
@@ -119,38 +122,36 @@ class TestESKF:
         assert eskf.health == EKFHealth.HEALTHY
 
 
-#  Dead Reckon tests 
+#  Dead Reckon tests
 class TestDeadReckon:
-
     def test_stationary(self, dr):
         accel = np.array([0.0, 0.0, -9.80665])
-        gyro  = np.zeros(3)
+        gyro = np.zeros(3)
         for _ in range(100):
             dr.update(accel, gyro, 0.01)
-        assert np.linalg.norm(dr.pos) < 2.0   # some drift expected
+        assert np.linalg.norm(dr.pos) < 2.0  # some drift expected
 
     def test_forward_motion(self, dr):
         # push forward, position should increase
         accel = np.array([0.5, 0.0, -9.80665])
-        gyro  = np.zeros(3)
+        gyro = np.zeros(3)
         for _ in range(100):
             dr.update(accel, gyro, 0.01)
         assert dr.pos[0] > 0.0
 
 
-#  Noise Params tests 
+#  Noise Params tests
 class TestIMUNoiseParams:
-
     def test_defaults_positive(self, noise):
         assert noise.accel_std > 0
-        assert noise.gyro_std  > 0
-        assert noise.baro_std  > 0
-        assert noise.mag_std   > 0
+        assert noise.gyro_std > 0
+        assert noise.baro_std > 0
+        assert noise.mag_std > 0
 
     def test_summary_string(self, noise):
         s = noise.summary()
         assert "Accel" in s
-        assert "Baro"  in s
+        assert "Baro" in s
 
 
 if __name__ == "__main__":

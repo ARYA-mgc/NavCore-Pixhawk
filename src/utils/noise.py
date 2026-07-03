@@ -19,43 +19,43 @@ class IMUNoiseParams:
 
     # Physical bounds for validation
     _BOUNDS = {
-        "accel_std":      (0.001, 2.0),
+        "accel_std": (0.001, 2.0),
         "accel_bias_std": (0.0001, 1.0),
         "accel_bias_tau": (1.0, 10000.0),
         "accel_bias_limit": (0.1, 10.0),
-        "gyro_std":       (0.0001, 0.5),
-        "gyro_bias_std":  (0.00001, 0.1),
-        "gyro_bias_tau":  (1.0, 10000.0),
+        "gyro_std": (0.0001, 0.5),
+        "gyro_bias_std": (0.00001, 0.1),
+        "gyro_bias_tau": (1.0, 10000.0),
         "gyro_bias_limit": (0.01, 1.0),
-        "baro_std":       (0.01, 5.0),
-        "mag_std":        (0.001, 0.5),
+        "baro_std": (0.01, 5.0),
+        "mag_std": (0.001, 0.5),
     }
 
     def __init__(self, config_path: str = _DEFAULT_CONFIG):
         # ── IMU (ICM-42688-P on Cube Orange) ───────────────────
         # Accelerometer noise density: 70 µg/√Hz  → at 100 Hz BW:
-        self.accel_std        = 0.05    # m/s²     (σ of white noise)
-        self.accel_bias_std   = 0.02    # m/s²     (slowly-varying bias)
-        self.accel_bias_tau   = 300.0   # s        (bias correlation time)
-        self.accel_bias_limit = 2.0     # m/s²     (max bias magnitude)
+        self.accel_std = 0.05  # m/s²     (σ of white noise)
+        self.accel_bias_std = 0.02  # m/s²     (slowly-varying bias)
+        self.accel_bias_tau = 300.0  # s        (bias correlation time)
+        self.accel_bias_limit = 2.0  # m/s²     (max bias magnitude)
 
         # Gyroscope noise density: 0.0028 °/s/√Hz
-        self.gyro_std         = 0.005   # rad/s
-        self.gyro_bias_std    = 0.001   # rad/s
-        self.gyro_bias_tau    = 300.0   # s
-        self.gyro_bias_limit  = 0.1     # rad/s
+        self.gyro_std = 0.005  # rad/s
+        self.gyro_bias_std = 0.001  # rad/s
+        self.gyro_bias_tau = 300.0  # s
+        self.gyro_bias_limit = 0.1  # rad/s
 
         # ── Barometer (MS5611) ─────────────────────────────────
         # Altitude noise ≈ 0.1-0.3 m RMS under vibration
-        self.baro_std         = 0.30    # m
+        self.baro_std = 0.30  # m
 
         # ── Magnetometer (RM3100) ──────────────────────────────
         # Yaw noise after hard/soft-iron calibration
-        self.mag_std          = 0.02    # rad  (~1.1°)
+        self.mag_std = 0.02  # rad  (~1.1°)
 
         # ── GPS (when available, for reference) ────────────────
-        self.gps_pos_std      = 2.5     # m   (CEP50 typical)
-        self.gps_vel_std      = 0.1     # m/s
+        self.gps_pos_std = 2.5  # m   (CEP50 typical)
+        self.gps_vel_std = 0.1  # m/s
 
         # ── Load from YAML if it exists ────────────────────────
         self._load_yaml(config_path)
@@ -74,20 +74,20 @@ class IMUNoiseParams:
             if unknown:
                 log.warning(f"Unknown config sections ignored: {unknown}")
 
-            imu  = cfg.get("imu",  {})
+            imu = cfg.get("imu", {})
             baro = cfg.get("baro", {})
-            mag  = cfg.get("mag",  {})
+            mag = cfg.get("mag", {})
 
-            self.accel_std      = imu.get("accel_std",      self.accel_std)
+            self.accel_std = imu.get("accel_std", self.accel_std)
             self.accel_bias_std = imu.get("accel_bias_std", self.accel_bias_std)
             self.accel_bias_tau = imu.get("accel_bias_tau", self.accel_bias_tau)
             self.accel_bias_limit = imu.get("accel_bias_limit", self.accel_bias_limit)
-            self.gyro_std       = imu.get("gyro_std",       self.gyro_std)
-            self.gyro_bias_std  = imu.get("gyro_bias_std",  self.gyro_bias_std)
-            self.gyro_bias_tau  = imu.get("gyro_bias_tau",  self.gyro_bias_tau)
+            self.gyro_std = imu.get("gyro_std", self.gyro_std)
+            self.gyro_bias_std = imu.get("gyro_bias_std", self.gyro_bias_std)
+            self.gyro_bias_tau = imu.get("gyro_bias_tau", self.gyro_bias_tau)
             self.gyro_bias_limit = imu.get("gyro_bias_limit", self.gyro_bias_limit)
-            self.baro_std       = baro.get("std",           self.baro_std)
-            self.mag_std        = mag.get("std",            self.mag_std)
+            self.baro_std = baro.get("std", self.baro_std)
+            self.mag_std = mag.get("std", self.mag_std)
 
             log.info(f"Noise params loaded from {path}")
         except Exception as e:
@@ -103,8 +103,9 @@ class IMUNoiseParams:
             if val <= 0:
                 errors.append(f"{param}={val} must be > 0")
             elif val < lo or val > hi:
-                log.warning(f"Noise param {param}={val} outside typical "
-                            f"range [{lo}, {hi}]")
+                log.warning(
+                    f"Noise param {param}={val} outside typical range [{lo}, {hi}]"
+                )
         if errors:
             raise ValueError("Invalid noise params: " + "; ".join(errors))
 

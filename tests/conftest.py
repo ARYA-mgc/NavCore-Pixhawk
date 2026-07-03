@@ -4,8 +4,6 @@
 
 """Shared fixtures and markers for the NavCore test suite."""
 
-import pytest
-
 
 def pytest_configure(config):
     config.addinivalue_line(

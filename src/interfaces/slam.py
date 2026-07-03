@@ -6,7 +6,6 @@ import logging
 import math
 import numpy as np
 from typing import Optional
-from collections import deque
 
 log = logging.getLogger("slam_interface")
 
@@ -17,11 +16,13 @@ CHI2_1DOF = 5.991
 def _quat_to_rotation(q: np.ndarray) -> np.ndarray:
     # quat to rotation matrix
     w, x, y, z = q
-    return np.array([
-        [1 - 2*(y*y + z*z),   2*(x*y - w*z),     2*(x*z + w*y)],
-        [2*(x*y + w*z),       1 - 2*(x*x + z*z), 2*(y*z - w*x)],
-        [2*(x*z - w*y),       2*(y*z + w*x),     1 - 2*(x*x + y*y)]
-    ])
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ]
+    )
 
 
 def _rotation_to_quat(R: np.ndarray) -> np.ndarray:
@@ -57,18 +58,20 @@ def _rotation_to_quat(R: np.ndarray) -> np.ndarray:
 
 def _quat_to_yaw(q: np.ndarray) -> float:
     w, x, y, z = q
-    return math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+    return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
 
 
 def _quat_multiply(q1, q2):
     w1, x1, y1, z1 = q1
     w2, x2, y2, z2 = q2
-    return np.array([
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2,
-    ])
+    return np.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
 
 
 def _quat_inverse(q):
@@ -78,14 +81,15 @@ def _quat_inverse(q):
 class SLAMInterface:
     # SLAM pose processing and alignment.
 
-    POS_STD = 0.10           # m — typical ORB-SLAM3
-    YAW_STD = 0.05           # rad (~3 deg)
-    LOOP_CLOSURE_COV_SCALE = 0.1   # tighten covariance on loop closure
-    MIN_UPDATE_INTERVAL = 0.05     # 20 Hz max
-    OUTLIER_JUMP_M = 3.0           # reject > 3m position jump
+    POS_STD = 0.10  # m — typical ORB-SLAM3
+    YAW_STD = 0.05  # rad (~3 deg)
+    LOOP_CLOSURE_COV_SCALE = 0.1  # tighten covariance on loop closure
+    MIN_UPDATE_INTERVAL = 0.05  # 20 Hz max
+    OUTLIER_JUMP_M = 3.0  # reject > 3m position jump
 
-    def __init__(self, enable: bool = False,
-                 pos_std: float = 0.10, yaw_std: float = 0.05):
+    def __init__(
+        self, enable: bool = False, pos_std: float = 0.10, yaw_std: float = 0.05
+    ):
         self._enabled = enable
         self._frame_aligned = False
         self._pose_count = 0
@@ -130,8 +134,13 @@ class SLAMInterface:
         self._frame_aligned = True
         log.info("SLAM→NED frame transform set")
 
-    def auto_align(self, slam_pos: np.ndarray, ned_pos: np.ndarray,
-                   slam_quat: np.ndarray, ned_quat: np.ndarray):
+    def auto_align(
+        self,
+        slam_pos: np.ndarray,
+        ned_pos: np.ndarray,
+        slam_quat: np.ndarray,
+        ned_quat: np.ndarray,
+    ):
         # Compute transform from matched pose pair.
         if not self._enabled:
             return
@@ -175,11 +184,14 @@ class SLAMInterface:
         self.set_frame_transform(R, t)
         log.info(f"SLAM frame aligned via Umeyama ({n} points)")
 
-    def process_slam_pose(self, t: float,
-                          position: np.ndarray,
-                          orientation: np.ndarray,
-                          covariance: Optional[np.ndarray] = None,
-                          is_loop_closure: bool = False) -> Optional[dict]:
+    def process_slam_pose(
+        self,
+        t: float,
+        position: np.ndarray,
+        orientation: np.ndarray,
+        covariance: Optional[np.ndarray] = None,
+        is_loop_closure: bool = False,
+    ) -> Optional[dict]:
         # Process incoming SLAM pose.
         if not self.is_active:
             return None
@@ -213,8 +225,8 @@ class SLAMInterface:
                 return None
 
         # Covariance handling
-        R_pos = np.eye(3) * (self.POS_STD ** 2)
-        R_yaw = np.array([[self.YAW_STD ** 2]])
+        R_pos = np.eye(3) * (self.POS_STD**2)
+        R_yaw = np.array([[self.YAW_STD**2]])
 
         if covariance is not None and covariance.shape == (6, 6):
             # Use SLAM-provided position covariance

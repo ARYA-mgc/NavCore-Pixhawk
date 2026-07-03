@@ -3,9 +3,8 @@
 # Like GPS, but indoors and needs more batteries.
 
 import logging
-import math
 import numpy as np
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 from collections import deque
 
 log = logging.getLogger("uwb_fusion")
@@ -20,7 +19,7 @@ class UWBAnchor:
         self.position = np.array(position, dtype=float)  # NED (3,)
         self.last_range = 0.0
         self.last_t = 0.0
-        self.range_history = deque(maxlen=20)
+        self.range_history = deque(maxlen=20)  # type: ignore
         self.rejected_count = 0
         self.accepted_count = 0
 
@@ -31,18 +30,18 @@ class UWBAnchor:
 
     def staleness(self, t_now: float) -> float:
         if self.last_t == 0.0:
-            return float('inf')
+            return float("inf")
         return t_now - self.last_t
 
 
 class UWBFusion:
     # Ultra-Wideband range fusion for the ESKF.
 
-    RANGE_STD = 0.15        # meters (typical DW1000)
-    MAX_RANGE = 100.0       # meters
-    MIN_RANGE = 0.3         # meters (too close = multipath)
-    NLOS_THRESHOLD = 3.0    # residual > N*sigma = probable NLOS
-    STALE_TIMEOUT = 2.0     # seconds
+    RANGE_STD = 0.15  # meters (typical DW1000)
+    MAX_RANGE = 100.0  # meters
+    MIN_RANGE = 0.3  # meters (too close = multipath)
+    NLOS_THRESHOLD = 3.0  # residual > N*sigma = probable NLOS
+    STALE_TIMEOUT = 2.0  # seconds
     MIN_ANCHORS_FOR_TRILATERATION = 3
 
     def __init__(self, enable: bool = False, range_std: float = 0.15):
@@ -73,8 +72,9 @@ class UWBFusion:
             del self._anchors[anchor_id]
             log.info(f"UWB anchor '{anchor_id}' removed")
 
-    def process_range(self, anchor_id: str, range_m: float, t: float,
-                      current_pos: np.ndarray) -> Optional[dict]:
+    def process_range(
+        self, anchor_id: str, range_m: float, t: float, current_pos: np.ndarray
+    ) -> Optional[dict]:
         # Process a single range measurement and produce an ESKF update.
         if not self._enabled:
             return None
@@ -107,7 +107,7 @@ class UWBFusion:
         H[0, 0:3] = -unit_vec
 
         # Measurement noise
-        R = np.array([[self.RANGE_STD ** 2]])
+        R = np.array([[self.RANGE_STD**2]])
 
         # Innovation covariance (scalar for 1-DOF)
         # S = H @ P @ H^T + R  -- caller (ESKF) will compute this
@@ -115,8 +115,9 @@ class UWBFusion:
         # NLOS detection: if residual is too large, inflate noise
         nlos_detected = False
         if abs(innovation) > self.NLOS_THRESHOLD * self.RANGE_STD:
-            log.debug(f"UWB anchor '{anchor_id}': possible NLOS "
-                      f"(residual={innovation:.2f}m)")
+            log.debug(
+                f"UWB anchor '{anchor_id}': possible NLOS (residual={innovation:.2f}m)"
+            )
             R *= 10.0  # heavily inflate
             nlos_detected = True
 
@@ -139,9 +140,9 @@ class UWBFusion:
             "nlos": nlos_detected,
         }
 
-    def trilaterate(self, current_pos: np.ndarray,
-                    t_now: float,
-                    max_age: float = 1.0) -> Optional[np.ndarray]:
+    def trilaterate(
+        self, current_pos: np.ndarray, t_now: float, max_age: float = 1.0
+    ) -> Optional[np.ndarray]:
         # Least-squares position estimate from multiple recent ranges.
         if not self._enabled:
             return None
@@ -173,8 +174,8 @@ class UWBFusion:
             if len(residuals) < self.MIN_ANCHORS_FOR_TRILATERATION:
                 return None
 
-            J = np.array(jacobian_rows)         # (N, 3)
-            r = np.array(residuals)              # (N,)
+            J = np.array(jacobian_rows)  # (N, 3)
+            r = np.array(residuals)  # (N,)
 
             # Normal equations: (J^T J) dx = J^T r
             JtJ = J.T @ J
@@ -188,8 +189,7 @@ class UWBFusion:
             if np.linalg.norm(dx) < 0.001:
                 break
 
-        log.debug(f"UWB trilateration: {len(valid_anchors)} anchors, "
-                  f"result={pos_est}")
+        log.debug(f"UWB trilateration: {len(valid_anchors)} anchors, result={pos_est}")
         return pos_est
 
     def get_status(self) -> dict:
