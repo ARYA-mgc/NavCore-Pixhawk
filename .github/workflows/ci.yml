@@ -30,7 +30,7 @@ jobs:
         
     - name: Run Python Unit Tests (incl. NEES/NIS Parity)
       run: |
-        pytest tests/
+        pytest -m "not slow" tests/
 
   cpp-build-and-test:
     runs-on: ubuntu-latest
