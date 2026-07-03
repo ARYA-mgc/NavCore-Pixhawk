@@ -1,18 +1,18 @@
-# NavCore-Pixhawk -- The "We Don't Need No Stinkin' GPS" Navigation System
+# NavCore-Pixhawk -- GPS-Aided INS with GPS-Denied Fallback for UAVs
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
 [![MAVLink](https://img.shields.io/badge/Protocol-MAVLink%202.0-green)](https://mavlink.io)
 [![Hardware](https://img.shields.io/badge/FC-Pixhawk%20Cube%20Orange-orange)](https://cubepilot.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> Real-time GPS-denied INS for UAVs using a **Pixhawk Cube Orange** and a **Raspberry Pi 4**.  
-> We basically ported a giant MATLAB headache into Python, slapped it on a drone, and it actually flies.
+> GPS-aided Inertial Navigation System with GPS-denied fallback capability for UAVs, using a **Pixhawk Cube Orange** and a **Raspberry Pi 4**.  
+> Fuses IMU, baro, mag, GPS, VIO, lidar, and radar. When GPS is available it's used; when it dies, the INS keeps flying on its own.
 
 ---
 
 ## What is this? (Overview)
 
-NavCore-Pixhawk is the result of asking, "What if the GPS dies and the drone panics?" It implements a tightly-coupled Inertial Navigation System (INS) that fuses IMU, barometer, magnetometer, GPS, optical flow, VIO, lidar, and radar data. It uses a **16-state Error-State Quaternion EKF (ESKF)** with **multi-IMU fusion**, **adaptive process noise**, **zero velocity updates (ZUPT)**, **barometric drift compensation**, **magnetometer auto-calibration**, and optional **tight GPS/INS coupling** at the pseudorange level.
+NavCore-Pixhawk is the result of asking, "What if the GPS dies and the drone panics?" It implements a tightly-coupled Inertial Navigation System (INS) that fuses IMU, barometer, magnetometer, GPS, optical flow, VIO, lidar, and radar data. It uses a **21-state Error-State Quaternion EKF (ESKF)** — state vector: position (3), velocity (3), quaternion (4), accel bias (3), gyro bias (3), barometer bias (1), receiver clock bias (1), clock drift (1), 2D wind (2) — with **square-root covariance propagation (QR-factored Cholesky)**, **multi-IMU fusion**, **adaptive process noise**, **zero velocity updates (ZUPT)**, **barometric drift compensation**, **magnetometer auto-calibration**, and optional **tight GPS/INS coupling** at the pseudorange level.
 
 We take these guesses and feed them back into ArduPilot's EKF3 as a fake GPS signal via `VISION_POSITION_ESTIMATE`. ArduPilot is happy, the drone flies, and we get to look like geniuses.
 
@@ -24,13 +24,13 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 
 - **Multi-IMU Fusion:** Cube Orange has 3 IMUs (ICM-42688, ICM-20948, ICM-20649). All three are fused via median voting and inverse-variance weighting. Outlier IMUs are automatically flagged and downweighted.
 - **GPS Fusion with Smooth Handoff:** WGS-84 → local NED conversion with HDOP-scaled noise. Auto-origin on first fix. Smooth GPS→INS handoff when GPS comes back online after outage.
-- **Tight GPS/INS Coupling:** Optional pseudorange-level fusion via direct u-blox F9P UART serial (`UBX RXM-RAWX`). Per-satellite CN0-weighted noise and multipath rejection. Aerospace-grade accuracy.
+- **Tight GPS/INS Coupling:** Optional pseudorange-level fusion via direct u-blox F9P UART serial (`UBX RXM-RAWX`). Per-satellite CN0-weighted noise and multipath rejection. Includes simulated pseudorange generator for testing with the hardware.
 - **Visual-Inertial Odometry (VIO):** `VIOPipeline` is fully integrated — camera-based position correction for massive accuracy improvement in GPS-denied environments.
 - **Zero Velocity Update (ZUPT):** When the drone is stationary on the ground, velocity is forced to zero as a measurement update. Dramatically reduces drift during idle periods.
 - **Adaptive Process Noise:** Q matrix scales with detected vibration level (1× calm → 10× severe). Driven by multi-IMU variance and ML anomaly detection.
 - **Barometric Drift Compensation:** Slow EMA bias estimator tracks baro drift from temperature and weather changes. Clamped to ±10m, activates after initial convergence.
 - **Magnetometer Auto-Calibration:** `_calibrated_mag_norm` is slowly updated during flight via EMA (τ ≈ 60s), adapting to soft-iron distortion changes.
-- **ML Predictive Safety:** An unsupervised `IsolationForest` runs in the background. If it detects anomalous vibration or filter variance, it flags an imminent failure *before* the drone diverges.
+- **ML Anomaly Detection:** An unsupervised `IsolationForest` runs in the background, flagging statistical anomalies in vibration and filter variance. This is an outlier detector trained on nominal flight data — it has not been validated against labeled failure cases and should not be treated as a failure predictor.
 - **3D Lidar & Radar Fusion:** Tailored for the **Livox Mid-360** and **TI mmWave** radar. Real MAVLink `OBSTACLE_DISTANCE` and radar field parsing — no mock data.
 - **Asynchronous Execution:** Heavy math like point cloud downsampling and ML inference is offloaded to a `ThreadPoolExecutor` so it never blocks the 100Hz real-time loop.
 - **Smart Return to Home (RTH):** If a fault occurs, the companion computer commands the drone back to launch. It uses Lidar ceiling clearance checks and respects altitude (no blind climbing into ceilings).
@@ -41,8 +41,8 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 ## Hexacopter Flight Test Video
 
 > [!IMPORTANT]
-> **Live Flight Test Validation**  
-> Live flight test of the hexacopter with NavCore-Pixhawk INS active, validating real-time state estimation performance under actual flight conditions. GPS was enabled during this test solely as a safety fallback and was not used as a navigation input to the INS pipeline.
+> **Live Flight Test — Stability Demonstration**  
+> Live flight of the hexacopter with the NavCore-Pixhawk INS pipeline running alongside ArduPilot. GPS was active as the primary navigation source and safety fallback during this flight. This video demonstrates flight stability with the INS pipeline active — it does **not** validate INS position accuracy, as no RTK ground truth was recorded concurrently. Accuracy validation requires the RTK ground truth pipeline (`scripts/rtk_validate.py`) with real-flight data, which has only been tested with simulated data so far.
 > 
 > 🎥 **[Watch the Flight Video](https://github.com/ARYA-mgc/NavCore-Pixhawk/raw/main/doc/flight.mp4)**
 > 
@@ -70,12 +70,12 @@ Mission Planner compass priority and onboard magnetometer calibration interface.
 
 | Parameter | Value |
 |---|---|
-| Estimator | 21-state Square-Root Error-State Kalman Filter (SR-ESKF) |
+| Estimator | 21-state Error-State Kalman Filter (ESKF) with QR-factored Cholesky covariance propagation. Dedicated `SquareRootESKF` subclass available with Potter's sequential scalar updates. |
 | EKF Rate | 50 Hz / 100 Hz (configurable) |
 | IMU Fusion | 3-IMU median voting + inverse-variance weighting (Cube Orange) |
 | Sensors Fused | 3× IMU + Baro (MS5611) + Mag (RM3100) + GPS + Livox Lidar + TI Radar + Optical Flow + VIO |
 | GPS Coupling | Loose (position-level) + Tight (pseudorange-level via u-blox F9P) |
-| Position RMSE | 0.4 -- 0.8 m (**simulation**) — RTK real-flight validation pipeline included |
+| Position RMSE | 0.4 -- 0.8 m (**simulation only** — no real-flight RTK ground truth collected yet). RTK validation pipeline included but tested with simulated data only. |
 | Protocol | MAVLink 2.0 via `pymavlink` |
 | GPS Injection | `VISION_POSITION_ESTIMATE` into ArduPilot EKF3 |
 | Logging | CSV at 50 Hz + structured JSONL + optional UDP telemetry to GCS |
@@ -92,7 +92,7 @@ NavCore-Pixhawk/
 ├── src/
 │   ├── core/
 │   │   ├── m.py                    <- Main entry point & MAVLink param server
-│   │   ├── eskf.py                 <- 16-state Error-State Quaternion EKF
+│   │   ├── eskf.py                 <- 21-state Error-State Quaternion EKF (SR covariance)
 │   │   └── dr.py                   <- Fallback dead-reckoning
 │   ├── fusion/
 │   │   ├── lr.py                   <- Livox Lidar & TI Radar fusion
@@ -130,9 +130,9 @@ NavCore-Pixhawk/
 
 Top-level entry point that orchestrates the entire INS pipeline. Initialises all subsystems (MAVLink bridge, EKF, dead-reckoning, adaptive PID, optical flow), manages the real-time main loop, and handles graceful shutdown via SIGINT/SIGTERM. The main loop dispatches incoming MAVLink messages (RAW_IMU, SCALED_PRESSURE, SCALED_IMU2/3, ATTITUDE, GPS_RAW_INT, OPTICAL_FLOW_RAD) to their respective handlers. Periodic tasks include CSV logging at 50 Hz, console output at 10 Hz, and system statistics every 5 seconds. Monitors Raspberry Pi CPU temperature and sends MAVLink STATUSTEXT warnings when it exceeds 80 C. Supports UART, USB, and TCP (SITL) connections via command-line arguments.
 
-### src/eskf_core.py -- 16-State Error-State Quaternion EKF
+### src/eskf_core.py -- 21-State Error-State Quaternion EKF
 
-Production state estimation engine implementing a 16-state Error-State Kalman Filter with quaternion attitude representation. State vector: `x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]` covering position (NED), velocity (NED), attitude quaternion (gimbal-lock-free), accelerometer bias, and gyroscope bias. The error state uses a 15-dimensional vector with rotation error parameterised as a 3-vector. The predict step performs IMU mechanisation with bias compensation using the rotation matrix derived from the quaternion. Measurement updates for barometric altitude and magnetometer yaw use Joseph-form covariance updates (`P = (I-KH)P(I-KH)^T + KRK^T`) with innovation gating and 3-tier magnetometer rejection. Covariance hardening enforces symmetry and bounds eigenvalues every step. The legacy Euler-angle EKF has been permanently removed.
+Production state estimation engine implementing a 21-state Error-State Kalman Filter with quaternion attitude representation. State vector: `x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z, baro_bias, clk_bias, clk_drift, wind_n, wind_e]` covering position (NED), velocity (NED), attitude quaternion (gimbal-lock-free), accelerometer bias, gyroscope bias, barometric altitude bias, receiver clock bias and drift (for tight GPS coupling), and 2D wind estimation. The error state uses a 20-dimensional vector with rotation error parameterised as a 3-vector. Covariance is propagated in square-root form via QR decomposition of the upper Cholesky factor `U` (where `P = U^T U`). The predict step performs RK4 IMU mechanisation with bias compensation. Measurement updates for barometric altitude and magnetometer yaw use Joseph-form covariance updates (`P = (I-KH)P(I-KH)^T + KRK^T`) with innovation gating and 3-tier magnetometer rejection, followed by re-Cholesky factorization. The legacy Euler-angle EKF has been permanently removed.
 
 ### src/mavlink_bridge.py -- MAVLink Hardware Interface
 
@@ -145,8 +145,8 @@ Sensor noise model for Pixhawk Cube Orange hardware. Stores standard deviations 
 ### src/core/m.py -- System Coordinator & Param Server
 The main entry point. Orchestrates the 100Hz loop, handles MAVLink communication, and serves as a parameter server for Mission Planner. Integrates multi-IMU fusion (3 channels), adaptive process noise scaling, ZUPT stationary detection, GPS/VIO fusion, and manages the background thread pool for heavy math.
 
-### src/core/eskf.py -- 16-State Error-State Quaternion EKF
-The core navigation filter. Fuses IMU, Baro, Mag, GPS, Lidar/Radar, Optical Flow, and VIO data using a 16-state error-state formulation. Features covariance-based convergence (z-axis only, baro-observable), adaptive process noise (`Q_base * vibration_scale`), zero velocity updates, barometric drift compensation with slow EMA bias estimator, magnetometer auto-calibration, and generic external measurement update for arbitrary sensor sources.
+### src/core/eskf.py -- 21-State Error-State Quaternion EKF
+The core navigation filter. 21 nominal states (20-dimensional error state). Fuses IMU, Baro, Mag, GPS, Lidar/Radar, Optical Flow, and VIO data. State vector includes position, velocity, quaternion attitude, accel/gyro biases, barometric bias, receiver clock bias/drift, and 2D wind. Covariance is maintained in square-root form (upper Cholesky factor `U`, propagated via QR decomposition). Features RK4 integration, covariance-based convergence (z-axis only, baro-observable), adaptive process noise (`Q_base * vibration_scale`), zero velocity updates, barometric drift compensation (bias as proper filter state), magnetometer auto-calibration, and generic external measurement update for arbitrary sensor sources.
 
 ### src/fusion/multi_imu.py -- Multi-IMU Fusion
 Fuses Cube Orange's 3 IMUs via median voting and inverse-variance weighting. Outlier detection (>2 m/s² deviation), per-channel health tracking with fault counts and auto-recovery, and vibration level computation for adaptive Q scaling.
@@ -235,7 +235,7 @@ graph TD
         
         subgraph "Primary Navigation Core"
             MHT["mht.py<br>(Multi-Hypothesis Tracker)"]
-            ESKF["eskf.py<br>21-State SR-ESKF"]
+            ESKF["eskf.py<br>21-State ESKF"]
             Predict["Predict Step (RK4, 100Hz)<br>U_new = QR(U*Fᵀ, √Q)"]
             RAIM["RAIM / NIS Gating<br>(Outlier Rejection)"]
             OOSM["OOSM History Buffer<br>(State Rewind & Re-propagate)"]
@@ -275,7 +275,7 @@ graph TD
     %% Output Distribution
     subgraph "Output & Control Layer"
         Log["ins_logger.py<br>CSV (50Hz) + JSONL"]
-        Vis["vision_position_injector.py<br>VISION_POSITION_ESTIMATE (30Hz)"]
+        Vis["vision_position_injector.py<br>VISION_POSITION_ESTIMATE (target 30Hz)"]
         ArduPilot["ArduPilot EKF3<br>(Flight Controller)"]
         
         Safety -- "Validated State" --> Log
@@ -287,15 +287,16 @@ graph TD
 
 **Sensor Layer** -- The Pixhawk Cube Orange streams raw IMU data at 100 Hz, barometric pressure at 10 Hz, and magnetometer readings at 50 Hz over a MAVLink 2.0 UART link at 921600 baud.
 
-**Estimation Layer** -- `mavlink_bridge.py` on the Raspberry Pi 4 receives and parses `RAW_IMU`, `SCALED_PRESSURE`, and `SCALED_IMU3` messages. The parsed sensor data is passed to `eskf_core.py`, which implements a 16-state Error-State Quaternion EKF:
+**Estimation Layer** -- `mavlink_bridge.py` on the Raspberry Pi 4 receives and parses `RAW_IMU`, `SCALED_PRESSURE`, and `SCALED_IMU3` messages. The parsed sensor data is passed to `eskf.py`, which implements a 21-state Error-State Quaternion EKF with square-root covariance:
 
-- **State Vector**: `x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z]`
-- **Predict**: IMU mechanisation with quaternion rotation and bias compensation
-- **Propagate**: Covariance via `P = F * P * F^T + Q * dt` with Joseph-form measurement updates
-- **Harden**: Symmetry enforcement, eigenvalue bounding, condition number monitoring
+- **State Vector (21)**: `x = [px, py, pz, vx, vy, vz, qw, qx, qy, qz, ba_x, ba_y, ba_z, bg_x, bg_y, bg_z, baro_bias, clk_bias, clk_drift, wind_n, wind_e]`
+- **Error State (20)**: Rotation error parameterised as 3-vector (not quaternion), giving 20 error dimensions
+- **Predict**: RK4 IMU mechanisation with quaternion rotation and bias compensation
+- **Propagate**: Square-root covariance via QR decomposition: `U_new = R(QR([U*F^T; sqrt(Q*dt)]))`
+- **Update**: Joseph-form covariance update followed by re-Cholesky factorization
 - **Safety Gate**: Hard velocity/tilt/position-jump limits via `safety_monitor.py`
 
-**Output Layer** -- Estimated states are distributed to: `ins_logger` (CSV at 50 Hz), `vision_position_injector` (30 Hz to ArduPilot EKF3), `adaptive_pid` (gain-scheduled altitude control), and console output for real-time monitoring.
+**Output Layer** -- Estimated states are distributed to: `ins_logger` (CSV at 50 Hz), `vision_position_injector` (target 30 Hz to ArduPilot EKF3 — actual rate is jitter-dependent since Python cannot guarantee bounded timing), `adaptive_pid` (gain-scheduled altitude control), and console output for real-time monitoring.
 
 ---
 
@@ -454,7 +455,7 @@ mag:
 
 ## MATLAB Simulation Heritage
 
-The EKF core and navigation algorithms were first prototyped and validated in a high-fidelity MATLAB/Simulink simulation environment before being ported to Python for embedded deployment on the Raspberry Pi 4. The simulation uses a 15-state Euler-angle EKF; the production system has since migrated to a 16-state quaternion ESKF.
+The EKF core and navigation algorithms were first prototyped and validated in a high-fidelity MATLAB/Simulink simulation environment before being ported to Python for embedded deployment on the Raspberry Pi 4. The simulation uses a 15-state Euler-angle EKF; the production system has since migrated to a 21-state quaternion ESKF with square-root covariance propagation.
 
 For full simulation documentation, results, and visual analysis, see the [MATLAB Simulation README](./INS%20SYSTEM%20SIMULATED%20USING%20THE%20MATLAB/README.md).
 
@@ -472,7 +473,7 @@ This section documents current constraints honestly. Yes, we know about them. No
 
 **Accuracy Validation**: The 0.4-0.8 m RMSE figure is validated **in simulation only**. The RTK validation framework (`scripts/rtk_validate.py`) provides offline ESKF replay with ground truth comparison, but real-flight RTK ground truth data is still needed for field-validated numbers.
 
-**State Representation**: We use a 16-state Error-State Quaternion EKF. The legacy Euler-angle EKF was permanently deleted because gimbal lock is for losers. There is no fallback.
+**State Representation**: We use a 21-state Error-State Quaternion EKF (20-dimensional error state). The state vector includes position, velocity, quaternion, accel/gyro biases, barometric bias, receiver clock bias/drift, and 2D wind estimation. Covariance is maintained in square-root form via upper Cholesky factor. The legacy Euler-angle EKF was permanently deleted because gimbal lock is for losers. There is no fallback.
 
 **Sensor Limitations**: Pure IMU + barometer + magnetometer fusion will drift over time without external correction. The magnetometer auto-calibration (Feature 9) helps with soft-iron drift, and barometric drift compensation (Feature 8) reduces altitude bias, but long-duration GPS-denied flights still require VIO or optical flow correction.
 
@@ -539,9 +540,22 @@ This section documents current constraints honestly. Yes, we know about them. No
 | Medium | Generic external measurement update | Done (`eskf.py: update_external`) |
 | Medium | **RTK ground truth collection pipeline** | Done (`rtk_collector.py`, `ntrip_client.py`, `flight_recorder.py`, `analyze_flight.py`) |
 
----
+
+## V2 Architecture Roadmap
+
+The following major algorithmic and safety updates are scoped for V2:
+
+| Priority | Item | Description |
+|---|---|---|
+| Critical | **Tightly-Coupled GPS (Gated, Not Scheduled)** | Transition from loosely-coupled (position fixes) to tightly-coupled fusion using raw pseudoranges. |
+| High | **Square-Root ESKF in C++** | Port the Python Square-Root (QR/Cholesky) formulation to the C++ Eigen backend. *Note: Cholesky downdates are the highest-risk math component here.* |
+| High | **GPS Spoofing Detection** | Move beyond RAIM multipath detection towards multi-constellation consensus checking and ML-driven spoofing detection. |
+| Medium | **WCET Profiling** | Formal Worst-Case Execution Time profiling on target embedded hardware for hard real-time certification. |
+
+
 
 ## RTK Ground Truth Collection (Real-Flight Validation)
+
 
 The pipeline enables centimeter-level ground truth comparison against the ESKF output during real flights.
 

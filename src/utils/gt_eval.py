@@ -65,6 +65,9 @@ def load_estimate_jsonl(path: str) -> List[Pose]:
                 continue
             try:
                 rec = json.loads(line)
+                if rec.get("schema_version") != "v1.0.0":
+                    log.warning("Skipping record with incompatible schema version.")
+                    continue
                 if rec.get("type") != "STATE":
                     continue
                 state = rec["state"]

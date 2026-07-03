@@ -44,6 +44,7 @@ class StructuredLogger:
             return
             
         record = {
+            "schema_version": "v1.0.0",
             "t": t,
             "type": "STATE",
             "health": health_status,
@@ -72,6 +73,7 @@ class StructuredLogger:
             return
             
         record = {
+            "schema_version": "v1.0.0",
             "t": t,
             "type": "INNOVATION",
             "sensor": sensor,

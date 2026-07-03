@@ -171,8 +171,18 @@ class MAVLinkBridge:
         return alt_m
 
     @staticmethod
-    def parse_mag_yaw(msg) -> float | None:
-        # SCALED_IMU3 → yaw in radians.
+    def parse_mag_yaw(msg, roll: float = 0.0, pitch: float = 0.0) -> float | None:
+        """SCALED_IMU3 → tilt-compensated yaw in radians.
+
+        Args:
+            msg: MAVLink SCALED_IMU3 message with xmag/ymag/zmag fields.
+            roll: Current roll angle (rad) for tilt compensation.
+            pitch: Current pitch angle (rad) for tilt compensation.
+
+        If roll and pitch are both zero (default), this reduces to the
+        level-flight approximation. For accurate yaw under tilt, pass
+        the current ESKF roll/pitch estimates.
+        """
         mx = msg.xmag * MAG_SCALE
         my = msg.ymag * MAG_SCALE
         mz = msg.zmag * MAG_SCALE
@@ -181,8 +191,12 @@ class MAVLinkBridge:
         if mag_norm < 0.05:   # sanity: Earth field ~0.25-0.65 Gauss
             return None
 
-        # Yaw from horizontal components (assumes level-ish flight)
-        yaw_rad = math.atan2(-my, mx)
+        # Tilt-compensated yaw: project mag vector into horizontal plane
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        mag_x_h = mx * cp + my * sr * sp + mz * cr * sp
+        mag_y_h = my * cr - mz * sr
+        yaw_rad = math.atan2(-mag_y_h, mag_x_h)
         return yaw_rad
 
     # ── command helpers ─────────────────────────────────────────
@@ -234,13 +248,29 @@ class MAVLinkBridge:
 
     def send_vision_position(self, pos: np.ndarray,
                               q: np.ndarray, t_us: int = 0):
-        # Send vision position estimate.
+        # Send vision position estimate with attitude from quaternion.
         if t_us == 0:
             t_us = int(time.monotonic() * 1e6)
+
+        # Convert quaternion [qw, qx, qy, qz] to Euler angles
+        qw, qx, qy, qz = q[0], q[1], q[2], q[3]
+        # Roll (x-axis rotation)
+        sinr_cosp = 2.0 * (qw * qx + qy * qz)
+        cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+        # Pitch (y-axis rotation)
+        sinp = 2.0 * (qw * qy - qz * qx)
+        sinp = max(-1.0, min(1.0, sinp))  # clamp for asin safety
+        pitch = math.asin(sinp)
+        # Yaw (z-axis rotation)
+        siny_cosp = 2.0 * (qw * qz + qx * qy)
+        cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+
         self._conn.mav.vision_position_estimate_send(
             t_us,
             float(pos[0]), float(pos[1]), float(pos[2]),
-            0.0, 0.0, 0.0,      # roll pitch yaw (optional)
+            roll, pitch, yaw,
         )
 
     def send_velocity_target(self, vx: float, vy: float, vz: float):

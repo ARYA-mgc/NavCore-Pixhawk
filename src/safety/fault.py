@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
-# Fault management.
-# The panic button coordinator.
+"""
+Fault Management & FMEA (Failure Modes and Effects Analysis)
+
+This module implements the safety state machine and orchestrates fallback behaviours.
+
+## FMEA Matrix
+| Sensor    | Failure Mode         | Detection Latency | False-Positive Rate | Fallback Behavior                     |
+|-----------|----------------------|-------------------|---------------------|---------------------------------------|
+| IMU       | Hard dropout/freeze  | < 50 ms           | Extremely Low       | Transition to EMERGENCY (Land/Disarm).|
+| GPS       | Multipath/Spoofing   | < 1.0 s (RAIM)    | Low                 | Optical Flow/Radar fallback.          |
+| Barometer | Blockage/Drift       | ~ 2-3 s           | Medium              | GPS altitude or Lidar fallback.       |
+| Magneto   | Magnetic distortion  | < 0.5 s           | High (Indoors)      | Rely on gyro integration (ZUPT).      |
+| Vision    | Feature loss / Lag   | < 0.2 s           | Medium              | Fallback to GPS/Flow.                 |
+
+## MLP vs RAIM Disagreement Policy
+- **RAIM (Receiver Autonomous Integrity Monitoring):** Deterministic chi-squared gate. Holds absolute veto power over data ingestion.
+- **MLP (Multilayer Perceptron):** Early-warning pattern recognition.
+- **Disagreement:** If RAIM = Healthy but MLP = Faulty, the MLP triggers a `PREDICTIVE_FAIL` state (early warning) but the sensor data is STILL USED by the filter. The MLP is unvalidated for hard failsafes and therefore cannot veto a sensor that passes the deterministic RAIM check.
+
+## Design Decisions
+- **Auto-Clearing:** `PREDICTIVE_FAIL` automatically clears and recovers to `NOMINAL` if the MLP stops flagging the fault for `RECOVERY_THRESHOLD` (50) consecutive cycles (~0.5s at 100Hz).
+- **Logging:** Every transition to `PREDICTIVE_FAIL` is logged via `logging.critical` alongside the name of the specific sensor that triggered the MLP, providing the necessary audit trail to evaluate the model's predictive value.
+"""
 
 import time
 import logging
@@ -16,7 +37,7 @@ class FlightMode(Enum):
     NOMINAL    = auto()   # All sensors healthy, full ESKF
     DEGRADED   = auto()   # Some sensors missing, reduced accuracy
     FAILSAFE   = auto()   # Critical sensor loss, dead-reckoning only
-    PREDICTIVE_FAIL = auto() # ML predicts imminent hardware/sensor failure
+    PREDICTIVE_FAIL = auto() # ML anomaly detector flagged unusual sensor/filter behaviour
     EMERGENCY  = auto()   # Estimator diverged, request land/disarm
 
 
@@ -112,7 +133,8 @@ class FaultManager:
             sh.mark_active(t)
 
     def update(self, t_now: float, ekf_healthy: bool,
-               safety_ok: bool, ml_fault: bool = False) -> FlightMode:
+               safety_ok: bool, ml_fault: str = "") -> FlightMode:
+        self._last_ml_fault = ml_fault
         # Evaluate system health and determine operating mode.
         # Check sensor staleness
         for sh in self.sensors.values():
@@ -154,8 +176,7 @@ class FaultManager:
         return self._mode
 
     def _evaluate_mode(self, imu_ok: bool, baro_ok: bool, mag_ok: bool,
-                       ekf_healthy: bool, safety_ok: bool, ml_fault: bool) -> FlightMode:
-        # Determine optimal flight mode.
+                       ekf_healthy: bool, safety_ok: bool, ml_fault: str) -> FlightMode:
         # EMERGENCY: no IMU or estimator diverged
         if not imu_ok:
             return FlightMode.EMERGENCY
@@ -163,17 +184,20 @@ class FaultManager:
         if not ekf_healthy and not safety_ok:
             return FlightMode.EMERGENCY
 
-        # FAILSAFE: IMU only, no aiding sensors
+        # FAILSAFE: IMU only, no aiding sensors (RAIM rejected everything or sensors died)
         if not baro_ok and not mag_ok:
             return FlightMode.FAILSAFE
 
-        # PREDICTIVE_FAIL: Machine learning anomaly detected.
-        if ml_fault:
-            return FlightMode.PREDICTIVE_FAIL
-
-        # DEGRADED: missing one aiding sensor
+        # DEGRADED: missing one aiding sensor (Deterministic faults)
         if not baro_ok or not mag_ok or not ekf_healthy:
             return FlightMode.DEGRADED
+
+        # MLP vs RAIM Disagreement Policy Enforcement:
+        # If we reach here, RAIM and watchdogs say all sensors are healthy (NOMINAL or DEGRADED).
+        # If MLP predicts a fault, we downgrade to PREDICTIVE_FAIL to warn GCS, but we DO NOT 
+        # escalate to FAILSAFE or EMERGENCY, because the neural network lacks certification authority.
+        if ml_fault:
+            return FlightMode.PREDICTIVE_FAIL
 
         # NOMINAL: everything good
         return FlightMode.NOMINAL
@@ -197,6 +221,8 @@ class FaultManager:
 
         msg = (f"FAULT MANAGER: {self._prev_mode.name} → {new_mode.name} "
                f"at t={t:.2f}s")
+        if new_mode == FlightMode.PREDICTIVE_FAIL and hasattr(self, '_last_ml_fault') and self._last_ml_fault:
+            msg += f" [Trigger: MLP anomaly on {self._last_ml_fault}]"
 
         level = getattr(logging, severity.get(new_mode, "INFO"))
         log.log(level, msg)

@@ -36,6 +36,9 @@ def load_eskf_jsonl(path: str) -> List[StateSnapshot]:
                 continue
             try:
                 rec = json.loads(line)
+                if rec.get("schema_version") != "v1.0.0":
+                    log.warning("Skipping record with incompatible schema version.")
+                    continue
                 if rec.get("type") != "STATE":
                     continue
                 s = rec["state"]

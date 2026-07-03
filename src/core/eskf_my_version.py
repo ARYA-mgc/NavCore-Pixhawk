@@ -189,9 +189,7 @@ class ESKF:
     @P.setter
     def P(self, value: np.ndarray):
         """Update Cholesky factor if full covariance is explicitly set."""
-        L = np.linalg.cholesky(value)
-        self.U = L.T
-        self.S = L
+        self.U = np.linalg.cholesky(value).T
 
     @property
     def state(self) -> dict:
@@ -242,8 +240,8 @@ class ESKF:
 
         # Roll and pitch from gravity — Newton's contribution to our startup routine
         ax, ay, az = accel_mean
-        roll = math.atan2(ay, -az)
-        pitch = math.atan2(ax, math.sqrt(ay**2 + az**2))
+        roll = math.atan2(ay, az)
+        pitch = math.atan2(-ax, math.sqrt(ay**2 + az**2))
 
         # Yaw from magnetometer (tilt-compensated, because raw mag yaw is a lie on a tilt)
         mag_mean = np.mean(mag_samples, axis=0)
@@ -318,17 +316,10 @@ class ESKF:
         FS = F @ self.S
         compound = np.hstack([FS, sqrt_Q])
 
-        try:
-            _, R_qr = np.linalg.qr(compound.T, mode='reduced')
-            self.S = R_qr[:ERROR_DIM, :ERROR_DIM].T
-            for i in range(ERROR_DIM):
-                if self.S[i, i] < 0:
-                    self.S[:, i] = -self.S[:, i]
-        except np.linalg.LinAlgError:
-            log.warning("SR-ESKF: QR failed in predict, falling back to standard")
-            P_fallback = F @ (self.S @ self.S.T) @ F.T + self.Q * dt
-            P_fallback = (P_fallback + P_fallback.T) / 2.0
-            self.S = self._safe_cholesky(P_fallback)
+        # Force standard predict for debugging
+        P_fallback = F @ (self.S @ self.S.T) @ F.T + self.Q * dt
+        P_fallback = (P_fallback + P_fallback.T) / 2.0
+        self.S = self._safe_cholesky(P_fallback)
             
         self.U = self.S.T
         
@@ -560,26 +551,16 @@ class ESKF:
             if src in self._sensor_rejections:
                 self._sensor_rejections[src] = 0
 
-        # Potter's sequential scalar processing
-        S_work = self.S.copy()
-        dx_total = np.zeros(ERROR_DIM)
-
-        for i in range(m):
-            h_i = H[i, :]
-            r_i = R[i, i]
-            f = S_work.T @ h_i
-            alpha = np.dot(f, f) + r_i
-            if alpha < 1e-15:
-                continue
-            K = S_work @ f / alpha
-            y_i = y[i] - np.dot(h_i, dx_total)
-            dx_total += K * y_i
-            beta = 1.0 / (1.0 + math.sqrt(r_i / alpha))
-            S_work = S_work - beta * np.outer(K, f)
+        # Force standard block update for debugging
+        K_full = P_check @ H.T @ S_inv
+        dx_total = K_full @ y
+        I_KH = np.eye(ERROR_DIM) - K_full @ H
+        P_final = I_KH @ P_check @ I_KH.T + K_full @ R @ K_full.T
+        P_final = (P_final + P_final.T) / 2.0
+        self.S = self._safe_cholesky(P_final)
 
         self._inject_error(dx_total)
-        self.S = S_work
-        self.U = S_work.T
+        self.U = self.S.T
         
         # Assertions
         assert np.isclose(np.linalg.norm(self.x[QUAT]), 1.0, atol=1e-5), "Quaternion lost normalization"
@@ -625,7 +606,6 @@ class ESKF:
         # Save original state for rollback on rejection
         x_orig = self.x.copy()
         U_orig = self.U.copy()
-        S_orig = self.S.copy()
 
         accepted = False
         for iteration in range(max_iter):
@@ -660,9 +640,7 @@ class ESKF:
                 # Joseph form covariance update + Re-Cholesky
                 I_KH = np.eye(ERROR_DIM) - K @ H
                 P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
-                L = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12)
-                self.U = L.T
-                self.S = L
+                self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
                 break
 
             # Apply intermediate correction (re-linearization point)
@@ -673,15 +651,12 @@ class ESKF:
                 accepted = True
                 I_KH = np.eye(ERROR_DIM) - K @ H
                 P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
-                L = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12)
-                self.U = L.T
-                self.S = L
+                self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
 
         if not accepted:
             # Rollback
             self.x = x_orig
             self.U = U_orig
-            self.S = S_orig
 
         return accepted
 
@@ -749,11 +724,6 @@ class ESKF:
         if np.any(np.isnan(self.U)) or np.any(np.isinf(self.U)):
             self._health = EKFHealth.FAULT
             log.critical("ESKF FAULT: NaN/Inf in covariance U")
-            return
-
-        if np.any(np.isnan(self.S)) or np.any(np.isinf(self.S)):
-            self._health = EKFHealth.FAULT
-            log.critical("ESKF FAULT: NaN/Inf in covariance S")
             return
 
         # Fault conditions

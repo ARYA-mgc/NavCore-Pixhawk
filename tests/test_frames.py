@@ -27,19 +27,30 @@ class TestFrames:
         roll_rad = math.radians(45)
         eskf.x[6:10] = eskf._euler_to_quat(roll_rad, 0, 0)
         
-        # Compute H matrix for Lidar update
-        # Lidar measures: h(x) = -pos_z / (cos(roll)*cos(pitch))
-        z_pred, H, _ = eskf._h_lidar(tilt_compensated=False)
+        # Capture H matrix and z_pred via mock
+        captured_H = None
+        captured_z_pred = None
+        
+        def mock_update_external(z, z_pred, H, R, source=""):
+            nonlocal captured_H, captured_z_pred
+            captured_H = H.copy()
+            captured_z_pred = z_pred.copy()
+            return True
+            
+        eskf.update_external = mock_update_external
+        
+        # Lidar measures distance (value doesn't matter for mock capture)
+        eskf.update_lidar_range(14.14)
         
         # cos(45) = 0.707
-        # Expected distance = 10 / 0.707 = 14.14 meters
+        # Expected distance = (-(-10)) / 0.707 = 14.14 meters
         expected_dist = true_alt / math.cos(roll_rad)
         
-        assert abs(z_pred - expected_dist) < 0.1, f"Lidar projection failed. Expected {expected_dist}, got {z_pred}"
+        assert captured_z_pred is not None, "update_external was not called"
+        assert abs(captured_z_pred[0] - expected_dist) < 0.1, f"Lidar projection failed. Expected {expected_dist}, got {captured_z_pred[0]}"
         
-        # The jacobian w.r.t Z position should be -1 / cos(45)
-        # H[2] is the derivative w.r.t pos_z (error state pos_z)
-        assert abs(H[0, 2] - (-1.0 / math.cos(roll_rad))) < 0.01
+        # The jacobian w.r.t Z position should be -1 / cos(45) (since pos Z is positive down, range = -pos_z / cos)
+        assert abs(captured_H[0, 2] - (-1.0 / math.cos(roll_rad))) < 0.01
 
     def test_optical_flow_rotational_compensation(self):
         """When pitching up, optical flow registers motion even if velocity is zero. 
@@ -66,36 +77,41 @@ class TestFrames:
         # But wait, in the plan I said "Optical flow ... use the full model, including v_body - (omega x r)".
         # Let's see if _h_optical_flow in eskf.py has that.
         
-        z_pred, H, _ = eskf._h_optical_flow()
+        captured_H = None
+        captured_z_pred = None
+        
+        def mock_update_external(z, z_pred, H, R, source=""):
+            nonlocal captured_H, captured_z_pred
+            captured_H = H.copy()
+            captured_z_pred = z_pred.copy()
+            return True
+            
+        eskf.update_external = mock_update_external
+        
+        eskf.update_optical_flow(0.0, 0.0, 10.0, 255)
         
         # With zero velocity, flow prediction should be zero
-        assert z_pred[0] == 0.0
-        assert z_pred[1] == 0.0
+        assert captured_z_pred[0] == 0.0
+        assert captured_z_pred[1] == 0.0
         
         # Set NED velocity to 10 m/s North
         eskf.x[3] = 10.0
         
         # Roll 90 degrees (right wing down)
-        # So Body Y points Down, Body Z points Left. Body X points North.
-        eskf.x[6:10] = eskf._euler_to_quat(math.radians(90), 0, 0)
-        
-        z_pred, H, _ = eskf._h_optical_flow()
-        
-        # Altitude is -eskf.x[2] = 10m.
-        # Since we are rolled 90 deg, Body Z is horizontal!
-        # The optical flow distance `d` is computed using Z position and attitude.
-        # If Body Z is horizontal, tilt angle is 90 deg, cos(90) = 0.
-        # This should be handled gracefully (e.g. capped tilt).
-        
-        # Let's test a 45 deg roll instead to avoid division by zero.
+        # We cap it at 84 deg in lidar, but optical flow uses full rot matrix for velocity mapping.
+        # Let's test a 45 deg roll instead to avoid edge cases.
         eskf.x[6:10] = eskf._euler_to_quat(math.radians(45), 0, 0)
-        z_pred, H, _ = eskf._h_optical_flow()
         
-        # Body X velocity is still roughly 10 (since roll doesn't affect X projection of North).
-        # d = 10 / cos(45) = 14.14m
-        # flow_x = v_body_x / d = 10 / 14.14 = 0.707 rad/s
-        expected_flow_x = 10.0 / (10.0 / math.cos(math.radians(45)))
-        assert abs(z_pred[0] - expected_flow_x) < 0.1
+        eskf.update_optical_flow(0.0, 0.0, 14.14, 255)
+        
+        # In the new code, update_optical_flow returns v_body[0:2] natively, not scaled by distance!
+        # Because we merged the MAVLink parsing into m.py, the flow_vx passed to update_optical_flow 
+        # is actually the ground velocity (vx = flow_vx/dt * distance).
+        # So z_pred is just v_body[0:2].
+        # For a North velocity of 10m/s and a roll of 45deg, the body X velocity is still 10m/s 
+        # (roll is around X axis, so X projection doesn't change).
+        expected_vbody_x = 10.0
+        assert abs(captured_z_pred[0] - expected_vbody_x) < 0.1
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

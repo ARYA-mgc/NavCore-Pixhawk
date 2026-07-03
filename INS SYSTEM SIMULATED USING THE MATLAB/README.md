@@ -9,7 +9,7 @@
 
 This folder contains the high-fidelity MATLAB/Simulink simulation that serves as the foundation for the NavCore-Pixhawk real-time INS. The simulation implements a 15-state Extended Kalman Filter with Euler angle attitude representation, synthetic trajectory generation, and noisy IMU/barometer/magnetometer measurement simulation.
 
-> **Note**: The production system (NavCore-Pixhawk) has since migrated to a 16-state Error-State Quaternion EKF (`eskf_core.py`) which eliminates the gimbal lock limitation of this Euler-based prototype. The MATLAB code is retained for reference and educational purposes.
+> **Note**: The production system (NavCore-Pixhawk) has since migrated to a 21-state Error-State Quaternion EKF (`eskf.py`) with square-root covariance propagation, which eliminates the gimbal lock limitation of this Euler-based prototype and adds barometric bias, receiver clock, and wind estimation. The MATLAB code is retained for reference and educational purposes.
 
 ---
 

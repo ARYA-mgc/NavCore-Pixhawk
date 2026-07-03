@@ -173,6 +173,10 @@ class INSNavSys:
         self._last_imu_t  = 0.0
         self._start_time  = None
 
+        self._last_gps_sats = 0
+        self._last_gps_hdop = 99.0
+        self._last_gps_vdop = 99.0
+
         # Timing diagnostics — proof that we actually hit 100Hz (sometimes)
         self.loop_monitor = LoopMonitor(target_dt=self.dt)
 
@@ -345,6 +349,7 @@ class INSNavSys:
 
             # Snapshot before prediction — in case GPS shows up late with Starbucks
             x_prev = self.eskf.x.copy()
+            S_prev = self.eskf.S.copy()
             U_prev = self.eskf.U.copy()
 
             self.mht.predict(fused_accel, fused_gyro, dt)
@@ -352,7 +357,7 @@ class INSNavSys:
             self._imu_count += 1
             
             # Save to the time-travel buffer for late measurements
-            self._oosm_buffer.append((t_now, x_prev, U_prev, fused_accel, fused_gyro, dt))
+            self._oosm_buffer.append((t_now, x_prev, S_prev, U_prev, fused_accel, fused_gyro, dt))
 
             # Black box recording — future crash investigators will thank us
             if self.flight_recorder and self.flight_recorder.is_recording:
@@ -442,6 +447,12 @@ class INSNavSys:
                 lon = msg.lon / 1e7
                 alt = msg.alt / 1000.0  # mm → m
                 hdop = msg.eph / 100.0 if hasattr(msg, 'eph') else 2.0
+                vdop = msg.epv / 100.0 if hasattr(msg, 'epv') else 2.0
+                sats = msg.satellites_visible if hasattr(msg, 'satellites_visible') else 0
+                
+                self._last_gps_sats = sats
+                self._last_gps_hdop = hdop
+                self._last_gps_vdop = vdop
 
                 latency_s = self.params.get("GPS_LATENCY_S", 0.15)  # GPS: 150ms late. Every. Single. Time.
                 t_meas = t_now - latency_s
@@ -457,18 +468,23 @@ class INSNavSys:
                     
                     if replay_idx != -1:
                         # Step 2: ctrl+Z the filter state back in time
-                        _, x_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
+                        _, x_rewind, S_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
                         self.eskf.x = x_rewind.copy()
+                        self.eskf.S = S_rewind.copy()
                         self.eskf.U = U_rewind.copy()
                         
                         # Step 3: apply the late GPS fix (better late than never)
                         self.mht.update_gps(lat, lon, alt, hdop=hdop, t_now=t_meas)
                         
+                        # Run the predict for the replayed index!
+                        _, _, _, _, a_r, g_r, dt_r = self._oosm_buffer[replay_idx]
+                        self.mht.predict(a_r, g_r, dt_r)
+                        
                         # Step 4: fast-forward back to present with corrected history
                         for i in range(replay_idx + 1, len(self._oosm_buffer)):
-                            _, _, _, a, g, dt_hist = self._oosm_buffer[i]
+                            _, _, _, _, a, g, dt_hist = self._oosm_buffer[i]
                             # Overwrite history with the new, less-wrong version
-                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
+                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.S.copy(), self.eskf.U.copy(), a, g, dt_hist)
                             self.mht.predict(a, g, dt_hist)
                     else:
                         # Buffer ran out — we can't time-travel that far. Just wing it.
@@ -573,6 +589,7 @@ class INSNavSys:
                 log.info(f"Param updated via MAVLink: {param_id} = {msg.param_value}")
 
         elif mtype == "OPTICAL_FLOW_RAD":
+            self.fault_mgr.report_sensor_update("flow", t_now)
             if self.mht._initialized:
                 # Step 1: need a rangefinder reading or this is all meaningless
                 if not hasattr(msg, 'distance') or msg.distance <= 0.05:
@@ -627,21 +644,26 @@ class INSNavSys:
                             
                     if replay_idx != -1:
                         # Rewind — same OOSM time-travel trick as GPS
-                        _, x_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
+                        _, x_rewind, S_rewind, U_rewind, _, _, _ = self._oosm_buffer[replay_idx]
                         self.eskf.x = x_rewind.copy()
+                        self.eskf.S = S_rewind.copy()
                         self.eskf.U = U_rewind.copy()
                         
                         # Apply the VIO update at the correct historical moment
                         result = self.vio.process_vio_update(t_meas, pos_vio, quat_vio, confidence)
-                        if result is not None:
+                        if result is not None and result["type"] == "pose":
                             self.mht.update_external(result["pos_ned"], self.eskf.state["pos"], result["H_pos"], result["R_pos"], source="VIO_pos")
                             self.mht.update_external(np.array([result["yaw_ned"]]), np.array([self.eskf.state["euler"][2]]), result["H_yaw"], result["R_yaw"], source="VIO_yaw")
                             self._vio_count += 1
                         
+                        # Run predict for the replayed index
+                        _, _, _, _, a_r, g_r, dt_r = self._oosm_buffer[replay_idx]
+                        self.mht.predict(a_r, g_r, dt_r)
+                        
                         # Fast-forward back to now with corrected trajectory
                         for i in range(replay_idx + 1, len(self._oosm_buffer)):
-                            _, _, _, a, g, dt_hist = self._oosm_buffer[i]
-                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.U.copy(), a, g, dt_hist)
+                            _, _, _, _, a, g, dt_hist = self._oosm_buffer[i]
+                            self._oosm_buffer[i] = (self._oosm_buffer[i][0], self.eskf.x.copy(), self.eskf.S.copy(), self.eskf.U.copy(), a, g, dt_hist)
                             self.mht.predict(a, g, dt_hist)
                 else:
                     # No time-travel? Fine, just nudge VIO position by velocity × latency
@@ -673,12 +695,23 @@ class INSNavSys:
                 self.bridge.send_statustext("ML FAULT - ACTIVATING SMART RTH", 2)
                 self._rth_active = True
                 self.bridge.set_mode("GUIDED")
-                self.fault_mgr.update(t_now, ekf_healthy=True, safety_ok=True, ml_fault=True)
+                self.fault_mgr.update(t_now, ekf_healthy=True, safety_ok=True, ml_fault="GPS/Kinematic Spoofing Anomaly")
             
             # Fire off the next health prediction. yolo.
             self._ml_future = self.executor.submit(
-                self.ml_predictor.check_health, accel_var, gyro_proxy, p_trace
+                self.ml_predictor.check_health, accel_var, gyro_proxy, p_trace,
+                float(np.trace(self.eskf.P[3:6, 3:6])), self._last_gps_sats, self._last_gps_hdop, self._last_gps_vdop
             )
+
+    def shutdown(self):
+        """Cleanup resources before exit."""
+        if hasattr(self, 'executor'):
+            self.executor.shutdown(wait=False)
+        if self._rtk_enabled and self.rtk_collector:
+            self.rtk_collector.stop()
+        if self.flight_recorder:
+            self.flight_recorder.close()
+        log.info("NavCore shutdown complete.")
             
         # 1.5 Smart RTH — the "something went wrong, let's go home" autopilot
         if self._rth_active:
