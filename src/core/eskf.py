@@ -924,7 +924,7 @@ class ESKF:
         """
         scale = max(1.0, min(1.0 + vibration_level * 5.0, 10.0))
         self._vibration_scale = scale
-        self.Q = self.Q_base * scale
+        self.Q = self.Q_base * scale  # type: ignore[assignment]
 
     # ── Zero Velocity Update ───────────────────────────────────
 

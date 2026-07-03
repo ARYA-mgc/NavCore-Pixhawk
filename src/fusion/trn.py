@@ -385,7 +385,7 @@ class TerrainRelativeNavigation:
 
                 if ncc > best_corr:
                     best_corr = ncc
-                    best_offset = np.array([float(dr), float(dc)])
+                    best_offset = np.array([float(dr), float(dc)])  # type: ignore[assignment]
 
         return best_offset, max(best_corr, 0.0)
 

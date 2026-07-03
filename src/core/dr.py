@@ -50,7 +50,7 @@ class DeadReckon:
         )
         eta_dot = T_inv @ gyro
         self.euler += eta_dot * dt
-        self.euler = np.array(
+        self.euler = np.array(  # type: ignore[assignment]
             [math.atan2(math.sin(a), math.cos(a)) for a in self.euler]
         )
 
