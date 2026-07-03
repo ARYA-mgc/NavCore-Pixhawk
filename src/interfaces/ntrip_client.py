@@ -16,7 +16,6 @@ Features:
 """
 
 import time
-import math
 import socket
 import base64
 import logging
@@ -39,8 +38,7 @@ class NTRIPClient:
     BACKOFF_MULTIPLIER = 2.0
     BACKOFF_MAX_S = 30.0
 
-    def __init__(self, config: dict,
-                 serial_write_fn: Optional[Callable] = None):
+    def __init__(self, config: dict, serial_write_fn: Optional[Callable] = None):
         self._enabled = config.get("enabled", False)
         self._caster = config.get("caster", "rtk2go.com")
         self._port = config.get("port", 2101)
@@ -74,8 +72,11 @@ class NTRIPClient:
             "connected": self._connected,
             "bytes_received": self._bytes_received,
             "reconnects": self._reconnect_count,
-            "last_data_age_s": (time.monotonic() - self._last_data_time
-                                if self._last_data_time > 0 else -1),
+            "last_data_age_s": (
+                time.monotonic() - self._last_data_time
+                if self._last_data_time > 0
+                else -1
+            ),
         }
 
     def set_gga_source(self, fn: Callable):
@@ -91,8 +92,10 @@ class NTRIPClient:
             return
 
         if not self._mountpoint or self._mountpoint == "YOUR_MOUNT":
-            log.warning("NTRIP mountpoint not configured — skipping. "
-                        "Edit config/rtk_config.yaml to set mountpoint.")
+            log.warning(
+                "NTRIP mountpoint not configured — skipping. "
+                "Edit config/rtk_config.yaml to set mountpoint."
+            )
             return
 
         self._running = True
@@ -102,8 +105,9 @@ class NTRIPClient:
             daemon=True,
         )
         self._thread.start()
-        log.info(f"NTRIP client started → {self._caster}:{self._port}"
-                 f"/{self._mountpoint}")
+        log.info(
+            f"NTRIP client started → {self._caster}:{self._port}/{self._mountpoint}"
+        )
 
     def stop(self):
         """Stop NTRIP client and close socket."""
@@ -111,9 +115,11 @@ class NTRIPClient:
         self._close_socket()
         if self._thread:
             self._thread.join(timeout=3.0)
-        log.info(f"NTRIP client stopped. "
-                 f"Total RTCM bytes: {self._bytes_received}, "
-                 f"Reconnects: {self._reconnect_count}")
+        log.info(
+            f"NTRIP client stopped. "
+            f"Total RTCM bytes: {self._bytes_received}, "
+            f"Reconnects: {self._reconnect_count}"
+        )
 
     # ── Main Loop with Auto-Reconnect ─────────────────────────
 
@@ -138,8 +144,7 @@ class NTRIPClient:
             # Exponential backoff
             log.info(f"NTRIP reconnecting in {backoff:.0f}s...")
             time.sleep(backoff)
-            backoff = min(backoff * self.BACKOFF_MULTIPLIER,
-                          self._reconnect_max)
+            backoff = min(backoff * self.BACKOFF_MULTIPLIER, self._reconnect_max)
             self._reconnect_count += 1
 
     def _connect(self) -> bool:
@@ -247,9 +252,15 @@ class NTRIPClient:
 
 # ── GGA Generation Helper ────────────────────────────────────
 
-def generate_gga(lat_deg: float, lon_deg: float, alt_m: float,
-                 fix_quality: int = 4, n_sats: int = 12,
-                 hdop: float = 1.0) -> str:
+
+def generate_gga(
+    lat_deg: float,
+    lon_deg: float,
+    alt_m: float,
+    fix_quality: int = 4,
+    n_sats: int = 12,
+    hdop: float = 1.0,
+) -> str:
     """Generate NMEA GGA sentence from position.
 
     Args:
@@ -264,6 +275,7 @@ def generate_gga(lat_deg: float, lon_deg: float, alt_m: float,
         Complete NMEA GGA sentence with checksum
     """
     import datetime
+
     utc = datetime.datetime.now(datetime.timezone.utc)
     time_str = utc.strftime("%H%M%S.00")
 
@@ -281,9 +293,11 @@ def generate_gga(lat_deg: float, lon_deg: float, alt_m: float,
     lon_str = f"{lon_d:03d}{lon_m:09.6f}"
     lon_ew = "E" if lon_deg >= 0 else "W"
 
-    body = (f"GPGGA,{time_str},{lat_str},{lat_ns},"
-            f"{lon_str},{lon_ew},{fix_quality},{n_sats:02d},"
-            f"{hdop:.1f},{alt_m:.2f},M,0.00,M,,")
+    body = (
+        f"GPGGA,{time_str},{lat_str},{lat_ns},"
+        f"{lon_str},{lon_ew},{fix_quality},{n_sats:02d},"
+        f"{hdop:.1f},{alt_m:.2f},M,0.00,M,,"
+    )
 
     # NMEA checksum: XOR of all chars between $ and *
     checksum = 0

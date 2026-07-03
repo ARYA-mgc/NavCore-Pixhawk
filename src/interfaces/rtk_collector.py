@@ -17,63 +17,67 @@ import logging
 import threading
 import numpy as np
 from enum import IntEnum
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Deque
+from dataclasses import dataclass
+from typing import Optional, List, Deque
 from collections import deque
 
 log = logging.getLogger("rtk_collector")
 
 # ── Constants ────────────────────────────────────────────────
-R_EARTH = 6371000.0       # mean Earth radius (m)
+R_EARTH = 6371000.0  # mean Earth radius (m)
 
 # UBX protocol constants
 UBX_SYNC1 = 0xB5
 UBX_SYNC2 = 0x62
 UBX_CLASS_NAV = 0x01
 UBX_CLASS_CFG = 0x06
-UBX_ID_NAV_PVT = 0x07       # Position, Velocity, Time
+UBX_ID_NAV_PVT = 0x07  # Position, Velocity, Time
 UBX_ID_NAV_HPPOSLLH = 0x14  # High-precision geodetic position
-UBX_ID_CFG_MSG = 0x01       # Set message rate
+UBX_ID_CFG_MSG = 0x01  # Set message rate
 
 
 class RTKFixType(IntEnum):
     """u-blox NAV-PVT fixType + flags."""
-    NO_FIX     = 0
-    DEAD_RECK  = 1
-    FIX_2D     = 2
-    FIX_3D     = 3
-    GNSS_DR    = 4   # GNSS + dead reckoning
-    TIME_ONLY  = 5
+
+    NO_FIX = 0
+    DEAD_RECK = 1
+    FIX_2D = 2
+    FIX_3D = 3
+    GNSS_DR = 4  # GNSS + dead reckoning
+    TIME_ONLY = 5
 
 
 class CarrierSolution(IntEnum):
     """u-blox NAV-PVT carrSoln field (bits 6-7 of flags)."""
+
     NO_CARRIER = 0
-    RTK_FLOAT  = 1
-    RTK_FIXED  = 2
+    RTK_FLOAT = 1
+    RTK_FIXED = 2
 
 
 @dataclass
 class RTKFix:
     """A single RTK ground truth fix."""
-    timestamp_s: float         # monotonic system time
-    tow_ms: int                # GPS time of week (ms)
-    lat_deg: float             # WGS-84 latitude (degrees)
-    lon_deg: float             # WGS-84 longitude (degrees)
-    alt_m: float               # height above ellipsoid (m)
-    pos_ned: np.ndarray        # local NED position (m)
-    vel_ned: np.ndarray        # NED velocity (m/s)
-    fix_type: int              # RTKFixType value
-    carrier_solution: int      # CarrierSolution value
-    h_acc_m: float             # horizontal accuracy estimate (m)
-    v_acc_m: float             # vertical accuracy estimate (m)
-    n_sats: int                # number of satellites used
-    pdop: float                # position DOP
+
+    timestamp_s: float  # monotonic system time
+    tow_ms: int  # GPS time of week (ms)
+    lat_deg: float  # WGS-84 latitude (degrees)
+    lon_deg: float  # WGS-84 longitude (degrees)
+    alt_m: float  # height above ellipsoid (m)
+    pos_ned: np.ndarray  # local NED position (m)
+    vel_ned: np.ndarray  # NED velocity (m/s)
+    fix_type: int  # RTKFixType value
+    carrier_solution: int  # CarrierSolution value
+    h_acc_m: float  # horizontal accuracy estimate (m)
+    v_acc_m: float  # vertical accuracy estimate (m)
+    n_sats: int  # number of satellites used
+    pdop: float  # position DOP
 
 
 @dataclass
 class RTKStats:
     """Accumulated RTK collection statistics."""
+
     total_fixes: int = 0
     rtk_fixed_count: int = 0
     rtk_float_count: int = 0
@@ -139,7 +143,7 @@ class UBXNavParser:
             # Parse header
             cls = self._buffer[2]
             msg_id = self._buffer[3]
-            length = struct.unpack_from('<H', self._buffer, 4)[0]
+            length = struct.unpack_from("<H", self._buffer, 4)[0]
             total_len = 6 + length + 2  # header + payload + checksum
 
             if len(self._buffer) < total_len:
@@ -150,7 +154,7 @@ class UBXNavParser:
                 self._buffer = self._buffer[2:]
                 continue
 
-            payload = bytes(self._buffer[6:6 + length])
+            payload = bytes(self._buffer[6 : 6 + length])
 
             # Parse known message types
             if cls == UBX_CLASS_NAV and msg_id == UBX_ID_NAV_PVT:
@@ -169,8 +173,7 @@ class UBXNavParser:
 
     def _find_sync(self) -> int:
         for i in range(len(self._buffer) - 1):
-            if (self._buffer[i] == UBX_SYNC1 and
-                    self._buffer[i + 1] == UBX_SYNC2):
+            if self._buffer[i] == UBX_SYNC1 and self._buffer[i + 1] == UBX_SYNC2:
                 return i
         return -1
 
@@ -195,27 +198,27 @@ class UBXNavParser:
         if len(payload) < 92:
             return None
 
-        itow = struct.unpack_from('<I', payload, 0)[0]
+        itow = struct.unpack_from("<I", payload, 0)[0]
         fix_type = payload[20]
         flags = payload[21]
         num_sv = payload[23]
 
         # Position: degE-7 → degrees
-        lon_e7 = struct.unpack_from('<i', payload, 24)[0]
-        lat_e7 = struct.unpack_from('<i', payload, 28)[0]
-        height_mm = struct.unpack_from('<i', payload, 32)[0]   # ellipsoidal
+        lon_e7 = struct.unpack_from("<i", payload, 24)[0]
+        lat_e7 = struct.unpack_from("<i", payload, 28)[0]
+        height_mm = struct.unpack_from("<i", payload, 32)[0]  # ellipsoidal
 
         # Accuracy: mm → m
-        h_acc_mm = struct.unpack_from('<I', payload, 40)[0]
-        v_acc_mm = struct.unpack_from('<I', payload, 44)[0]
+        h_acc_mm = struct.unpack_from("<I", payload, 40)[0]
+        v_acc_mm = struct.unpack_from("<I", payload, 44)[0]
 
         # Velocity: mm/s → m/s
-        vel_n = struct.unpack_from('<i', payload, 48)[0] / 1000.0
-        vel_e = struct.unpack_from('<i', payload, 52)[0] / 1000.0
-        vel_d = struct.unpack_from('<i', payload, 56)[0] / 1000.0
+        vel_n = struct.unpack_from("<i", payload, 48)[0] / 1000.0
+        vel_e = struct.unpack_from("<i", payload, 52)[0] / 1000.0
+        vel_d = struct.unpack_from("<i", payload, 56)[0] / 1000.0
 
         # pDOP: 0.01
-        pdop = struct.unpack_from('<H', payload, 76)[0] / 100.0
+        pdop = struct.unpack_from("<H", payload, 76)[0] / 100.0
 
         # Carrier solution from flags bits 6-7
         carr_soln = (flags >> 6) & 0x03
@@ -245,22 +248,22 @@ class UBXNavParser:
         if len(payload) < 36:
             return None
 
-        version = payload[0]
-        itow = struct.unpack_from('<I', payload, 4)[0]
+        payload[0]
+        itow = struct.unpack_from("<I", payload, 4)[0]
 
-        lon_e7 = struct.unpack_from('<i', payload, 8)[0]
-        lat_e7 = struct.unpack_from('<i', payload, 12)[0]
-        height_mm = struct.unpack_from('<i', payload, 16)[0]
-        hmsl_mm = struct.unpack_from('<i', payload, 20)[0]
+        lon_e7 = struct.unpack_from("<i", payload, 8)[0]
+        lat_e7 = struct.unpack_from("<i", payload, 12)[0]
+        height_mm = struct.unpack_from("<i", payload, 16)[0]
+        struct.unpack_from("<i", payload, 20)[0]
 
         # High-precision residuals (0.1 mm = 1e-4 m)
-        lon_hp = struct.unpack_from('<b', payload, 24)[0]   # 1e-9 degrees
-        lat_hp = struct.unpack_from('<b', payload, 25)[0]
-        height_hp = struct.unpack_from('<b', payload, 26)[0]  # 0.1 mm
-        hmsl_hp = struct.unpack_from('<b', payload, 27)[0]
+        lon_hp = struct.unpack_from("<b", payload, 24)[0]  # 1e-9 degrees
+        lat_hp = struct.unpack_from("<b", payload, 25)[0]
+        height_hp = struct.unpack_from("<b", payload, 26)[0]  # 0.1 mm
+        struct.unpack_from("<b", payload, 27)[0]
 
-        h_acc_mm = struct.unpack_from('<I', payload, 28)[0]  # 0.1 mm
-        v_acc_mm = struct.unpack_from('<I', payload, 32)[0]
+        h_acc_mm = struct.unpack_from("<I", payload, 28)[0]  # 0.1 mm
+        v_acc_mm = struct.unpack_from("<I", payload, 32)[0]
 
         # Combine standard + high-precision
         lat_deg = lat_e7 / 1e7 + lat_hp * 1e-9
@@ -273,24 +276,24 @@ class UBXNavParser:
             "lat_deg": lat_deg,
             "lon_deg": lon_deg,
             "alt_m": alt_m,
-            "h_acc_m": h_acc_mm * 0.0001,   # 0.1mm → m
+            "h_acc_m": h_acc_mm * 0.0001,  # 0.1mm → m
             "v_acc_m": v_acc_mm * 0.0001,
         }
 
 
 # ── UBX Configuration Helpers ────────────────────────────────
 
+
 def build_ubx_cfg_msg(cls: int, msg_id: int, rate: int) -> bytes:
     """Build UBX-CFG-MSG to set message output rate on current port."""
-    payload = struct.pack('<BBB', cls, msg_id, rate)
+    payload = struct.pack("<BBB", cls, msg_id, rate)
     return _wrap_ubx_frame(UBX_CLASS_CFG, UBX_ID_CFG_MSG, payload)
 
 
 def _wrap_ubx_frame(cls: int, msg_id: int, payload: bytes) -> bytes:
     """Wrap payload in a complete UBX frame with sync + checksum."""
     length = len(payload)
-    header = struct.pack('<BBBBH', UBX_SYNC1, UBX_SYNC2,
-                         cls, msg_id, length)
+    header = struct.pack("<BBBBH", UBX_SYNC1, UBX_SYNC2, cls, msg_id, length)
     frame = header + payload
 
     # Fletcher-8 checksum over class + id + length + payload
@@ -303,6 +306,7 @@ def _wrap_ubx_frame(cls: int, msg_id: int, payload: bytes) -> bytes:
 
 
 # ── RTK Collector ────────────────────────────────────────────
+
 
 class RTKCollector:
     """Threaded RTK ground truth collector for u-blox F9P.
@@ -321,14 +325,20 @@ class RTKCollector:
         self._min_fix = rtk_cfg.get("min_fix_type", 5)
         self._max_hacc = rtk_cfg.get("max_hacc_m", 0.05)
         self._max_vacc = rtk_cfg.get("max_vacc_m", 0.10)
-        self._auto_devices = rtk_cfg.get("auto_detect_devices", [
-            "/dev/ttyAMA1", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0",
-        ])
+        self._auto_devices = rtk_cfg.get(
+            "auto_detect_devices",
+            [
+                "/dev/ttyAMA1",
+                "/dev/ttyACM0",
+                "/dev/ttyACM1",
+                "/dev/ttyUSB0",
+            ],
+        )
 
         self._serial = None
         self._parser = UBXNavParser()
-        self._origin = None        # WGS-84 origin for NED conversion
-        self._last_hp = None       # last HPPOSLLH for position refinement
+        self._origin = None  # WGS-84 origin for NED conversion
+        self._last_hp = None  # last HPPOSLLH for position refinement
 
         # Thread-safe fix buffer
         self._fixes: Deque[RTKFix] = deque(maxlen=50000)
@@ -379,7 +389,8 @@ class RTKCollector:
 
         try:
             self._serial = serial.Serial(
-                device, self._baud,
+                device,
+                self._baud,
                 timeout=0.1,
                 write_timeout=1.0,
             )
@@ -448,9 +459,11 @@ class RTKCollector:
             self._thread.join(timeout=2.0)
         if self._serial:
             self._serial.close()
-        log.info(f"RTK collector stopped. "
-                 f"Total fixes: {self.stats.total_fixes}, "
-                 f"RTK_FIXED: {self.stats.rtk_fixed_count}")
+        log.info(
+            f"RTK collector stopped. "
+            f"Total fixes: {self.stats.total_fixes}, "
+            f"RTK_FIXED: {self.stats.rtk_fixed_count}"
+        )
 
     def _reader_loop(self):
         """Background thread: read serial → parse UBX → buffer fixes."""
@@ -483,7 +496,7 @@ class RTKCollector:
         """Process parsed UBX message into RTKFix."""
         if msg["type"] == "NAV_HPPOSLLH":
             # Store high-precision position for refinement
-            self._last_hp = msg
+            self._last_hp = msg  # type: ignore
             return
 
         if msg["type"] != "NAV_PVT":
@@ -498,8 +511,7 @@ class RTKCollector:
         h_acc = msg["h_acc_m"]
         v_acc = msg["v_acc_m"]
 
-        if (self._last_hp is not None and
-                self._last_hp["tow_ms"] == msg["tow_ms"]):
+        if self._last_hp is not None and self._last_hp["tow_ms"] == msg["tow_ms"]:
             lat = self._last_hp["lat_deg"]
             lon = self._last_hp["lon_deg"]
             alt = self._last_hp["alt_m"]
@@ -510,17 +522,18 @@ class RTKCollector:
         carrier = msg["carrier_solution"]
         effective_fix = msg["fix_type"]
         if carrier == CarrierSolution.RTK_FIXED:
-            effective_fix = 5   # our convention
+            effective_fix = 5  # our convention
         elif carrier == CarrierSolution.RTK_FLOAT:
             effective_fix = 4
 
         # Set NED origin on first RTK_FIXED
         if self._origin is None and effective_fix >= self._min_fix:
-            self._origin = {
-                "lat": lat, "lon": lon, "alt": alt,
+            self._origin = {  # type: ignore
+                "lat": lat,
+                "lon": lon,
+                "alt": alt,
             }
-            log.info(f"RTK NED origin set: lat={lat:.8f} "
-                     f"lon={lon:.8f} alt={alt:.2f}m")
+            log.info(f"RTK NED origin set: lat={lat:.8f} lon={lon:.8f} alt={alt:.2f}m")
 
         # Convert to NED
         if self._origin is not None:
@@ -547,9 +560,11 @@ class RTKCollector:
         )
 
         # Quality gate
-        accepted = (effective_fix >= self._min_fix and
-                    h_acc <= self._max_hacc and
-                    v_acc <= self._max_vacc)
+        accepted = (
+            effective_fix >= self._min_fix
+            and h_acc <= self._max_hacc
+            and v_acc <= self._max_vacc
+        )
 
         self.stats.update(fix, accepted)
         self._last_fix = fix
@@ -560,19 +575,18 @@ class RTKCollector:
 
     def _wgs84_to_ned(self, lat: float, lon: float, alt: float) -> np.ndarray:
         """WGS-84 → local NED (same model as ESKF.update_gps)."""
-        d_lat = math.radians(lat - self._origin["lat"])
-        d_lon = math.radians(lon - self._origin["lon"])
-        lat_ref_rad = math.radians(self._origin["lat"])
+        d_lat = math.radians(lat - self._origin["lat"])  # type: ignore
+        d_lon = math.radians(lon - self._origin["lon"])  # type: ignore
+        lat_ref_rad = math.radians(self._origin["lat"])  # type: ignore
         north = d_lat * R_EARTH
         east = d_lon * R_EARTH * math.cos(lat_ref_rad)
-        down = -(alt - self._origin["alt"])
+        down = -(alt - self._origin["alt"])  # type: ignore
         return np.array([north, east, down])
 
     def set_origin(self, lat: float, lon: float, alt: float):
         """Manually set NED origin (e.g., to match ESKF GPS origin)."""
-        self._origin = {"lat": lat, "lon": lon, "alt": alt}
-        log.info(f"RTK origin manually set: lat={lat:.8f} "
-                 f"lon={lon:.8f} alt={alt:.2f}m")
+        self._origin = {"lat": lat, "lon": lon, "alt": alt}  # type: ignore
+        log.info(f"RTK origin manually set: lat={lat:.8f} lon={lon:.8f} alt={alt:.2f}m")
 
     def summary(self) -> str:
         """Return a human-readable summary of collection stats."""
@@ -581,7 +595,7 @@ class RTKCollector:
             "RTK Ground Truth Collection Summary",
             f"  Total fixes   : {s.total_fixes}",
             f"  RTK FIXED     : {s.rtk_fixed_count} "
-            f"({100*s.rtk_fixed_count/max(s.total_fixes,1):.1f}%)",
+            f"({100 * s.rtk_fixed_count / max(s.total_fixes, 1):.1f}%)",
             f"  RTK FLOAT     : {s.rtk_float_count}",
             f"  3D Fix        : {s.fix_3d_count}",
             f"  No fix        : {s.no_fix_count}",

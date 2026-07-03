@@ -1,0 +1,211 @@
+\doxysection{eskf\+\_\+core.\+hpp}
+\hypertarget{eskf__core_8hpp_source}{}\label{eskf__core_8hpp_source}\index{cpp\_port/include/eskf\_core.hpp@{cpp\_port/include/eskf\_core.hpp}}
+\doxymbox{\hyperlink{eskf__core_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ }
+\DoxyCodeLine{00029\ }
+\DoxyCodeLine{00030\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00031\ }
+\DoxyCodeLine{00032\ \textcolor{preprocessor}{\#include\ <Eigen/Dense>}}
+\DoxyCodeLine{00033\ \textcolor{preprocessor}{\#include\ <cmath>}}
+\DoxyCodeLine{00034\ \textcolor{preprocessor}{\#include\ <array>}}
+\DoxyCodeLine{00035\ \textcolor{preprocessor}{\#include\ <optional>}}
+\DoxyCodeLine{00036\ \textcolor{preprocessor}{\#include\ <string>}}
+\DoxyCodeLine{00037\ }
+\DoxyCodeLine{00038\ \textcolor{keyword}{namespace\ }navcore\ \{}
+\DoxyCodeLine{00039\ }
+\DoxyCodeLine{00040\ \textcolor{comment}{//\ ──\ Constants\ (Constants)\ ──────────────────────}}
+\DoxyCodeLine{00041\ }
+\DoxyCodeLine{00042\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ STATE\_DIM\ =\ 21;}
+\DoxyCodeLine{00043\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ ERROR\_DIM\ =\ 20;}
+\DoxyCodeLine{00044\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ GRAVITY\ =\ 9.80665;\ \textcolor{comment}{//\ Standard\ gravity}}
+\DoxyCodeLine{00045\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ CHI2\_1DOF\ =\ 3.841;\ \ \ \textcolor{comment}{//\ 1-\/DOF\ chi-\/squared\ threshold}}
+\DoxyCodeLine{00046\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ CHI2\_2DOF\ =\ 5.991;\ \ \ \textcolor{comment}{//\ 2-\/DOF\ gate}}
+\DoxyCodeLine{00047\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ CHI2\_3DOF\ =\ 7.815;\ \ \ \textcolor{comment}{//\ 3-\/DOF\ gate}}
+\DoxyCodeLine{00048\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ R\_EARTH\ =\ 6371000.0;\ \textcolor{comment}{//\ Earth\ radius\ approximation}}
+\DoxyCodeLine{00049\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ Z\_COV\_CONVERGED\ =\ 1.5;\ \textcolor{comment}{//\ Convergence\ threshold}}
+\DoxyCodeLine{00050\ }
+\DoxyCodeLine{00051\ \textcolor{comment}{//\ ──\ Type\ Aliases\ (Type\ Aliases)\ ──}}
+\DoxyCodeLine{00052\ }
+\DoxyCodeLine{00053\ \textcolor{keyword}{using\ }Vec3\ \ \ \ =\ Eigen::Vector3d;}
+\DoxyCodeLine{00054\ \textcolor{keyword}{using\ }Vec4\ \ \ \ =\ Eigen::Vector4d;}
+\DoxyCodeLine{00055\ \textcolor{keyword}{using\ }VecX\ \ \ \ =\ Eigen::Matrix<double,\ STATE\_DIM,\ 1>;}
+\DoxyCodeLine{00056\ \textcolor{keyword}{using\ }VecE\ \ \ \ =\ Eigen::Matrix<double,\ ERROR\_DIM,\ 1>;}
+\DoxyCodeLine{00057\ \textcolor{keyword}{using\ }Mat3\ \ \ \ =\ Eigen::Matrix3d;}
+\DoxyCodeLine{00058\ \textcolor{keyword}{using\ }Mat4\ \ \ \ =\ Eigen::Matrix4d;}
+\DoxyCodeLine{00059\ \textcolor{keyword}{using\ }MatP\ \ \ \ =\ Eigen::Matrix<double,\ ERROR\_DIM,\ ERROR\_DIM>;}
+\DoxyCodeLine{00060\ \textcolor{keyword}{using\ }MatQ\ \ \ \ =\ Eigen::Matrix<double,\ ERROR\_DIM,\ ERROR\_DIM>;}
+\DoxyCodeLine{00061\ \textcolor{keyword}{using\ }MatF\ \ \ \ =\ Eigen::Matrix<double,\ ERROR\_DIM,\ ERROR\_DIM>;}
+\DoxyCodeLine{00062\ }
+\DoxyCodeLine{00063\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ MAX\_OBS\_DIM\ =\ 6;}
+\DoxyCodeLine{00064\ \textcolor{comment}{//\ Dynamic-\/size\ types\ for\ generic\ updates,\ mapped\ to\ bounded\ fixed-\/size\ matrix\ allocation\ to\ avoid\ dynamic\ memory\ allocation\ on\ the\ heap.}}
+\DoxyCodeLine{00065\ \textcolor{keyword}{using\ }VecXd\ \ \ =\ Eigen::Matrix<double,\ Eigen::Dynamic,\ 1,\ 0,\ MAX\_OBS\_DIM,\ 1>;}
+\DoxyCodeLine{00066\ \textcolor{keyword}{using\ }MatXd\ \ \ =\ Eigen::Matrix<double,\ Eigen::Dynamic,\ Eigen::Dynamic,\ 0,\ MAX\_OBS\_DIM,\ ERROR\_DIM>;}
+\DoxyCodeLine{00067\ }
+\DoxyCodeLine{00068\ \textcolor{comment}{//\ ──\ Noise\ Parameters\ ─────────────────────────────────────────}}
+\DoxyCodeLine{00069\ }
+\DoxyCodeLine{00070\ \textcolor{keyword}{struct\ }\doxymbox{\hyperlink{structnavcore_1_1_i_m_u_noise_params}{IMUNoiseParams}}\ \{}
+\DoxyCodeLine{00071\ \ \ \ \ \textcolor{keywordtype}{double}\ accel\_std\ \ \ \ \ \ \ =\ 0.05;\ \ \ \ \ \ \textcolor{comment}{//\ m/s²}}
+\DoxyCodeLine{00072\ \ \ \ \ \textcolor{keywordtype}{double}\ accel\_bias\_std\ \ =\ 0.02;\ \ \ \ \ \ \textcolor{comment}{//\ m/s²}}
+\DoxyCodeLine{00073\ \ \ \ \ \textcolor{keywordtype}{double}\ accel\_bias\_tau\ \ =\ 300.0;\ \ \ \ \ \textcolor{comment}{//\ s}}
+\DoxyCodeLine{00074\ \ \ \ \ \textcolor{keywordtype}{double}\ accel\_bias\_limit\ =\ 2.0;\ \ \ \ \ \ \textcolor{comment}{//\ m/s²}}
+\DoxyCodeLine{00075\ \ \ \ \ \textcolor{keywordtype}{double}\ gyro\_std\ \ \ \ \ \ \ \ =\ 0.005;\ \ \ \ \ \textcolor{comment}{//\ rad/s}}
+\DoxyCodeLine{00076\ \ \ \ \ \textcolor{keywordtype}{double}\ gyro\_bias\_std\ \ \ =\ 0.001;\ \ \ \ \ \textcolor{comment}{//\ rad/s}}
+\DoxyCodeLine{00077\ \ \ \ \ \textcolor{keywordtype}{double}\ gyro\_bias\_tau\ \ \ =\ 300.0;\ \ \ \ \ \textcolor{comment}{//\ s}}
+\DoxyCodeLine{00078\ \ \ \ \ \textcolor{keywordtype}{double}\ gyro\_bias\_limit\ =\ 0.1;\ \ \ \ \ \ \ \textcolor{comment}{//\ rad/s}}
+\DoxyCodeLine{00079\ \ \ \ \ \textcolor{keywordtype}{double}\ baro\_std\ \ \ \ \ \ \ \ =\ 0.30;\ \ \ \ \ \ \textcolor{comment}{//\ m}}
+\DoxyCodeLine{00080\ \ \ \ \ \textcolor{keywordtype}{double}\ mag\_std\ \ \ \ \ \ \ \ \ =\ 0.02;\ \ \ \ \ \ \textcolor{comment}{//\ rad}}
+\DoxyCodeLine{00081\ \};}
+\DoxyCodeLine{00082\ }
+\DoxyCodeLine{00083\ \textcolor{comment}{//\ ──\ Health\ Status\ ────────────────────────────────────────────}}
+\DoxyCodeLine{00084\ }
+\DoxyCodeLine{00085\ \textcolor{keyword}{enum\ class}\ EKFHealth\ \{}
+\DoxyCodeLine{00086\ \ \ \ \ CONVERGING\ =\ 0,}
+\DoxyCodeLine{00087\ \ \ \ \ HEALTHY\ \ \ \ =\ 1,}
+\DoxyCodeLine{00088\ \ \ \ \ WARNING\ \ \ \ =\ 2,}
+\DoxyCodeLine{00089\ \ \ \ \ FAULT\ \ \ \ \ \ =\ 3,}
+\DoxyCodeLine{00090\ \};}
+\DoxyCodeLine{00091\ }
+\DoxyCodeLine{00092\ \textcolor{comment}{//\ ──\ GPS\ Origin\ ───────────────────────────────────────────────}}
+\DoxyCodeLine{00093\ }
+\DoxyCodeLine{00094\ \textcolor{keyword}{struct\ }\doxymbox{\hyperlink{structnavcore_1_1_g_p_s_origin}{GPSOrigin}}\ \{}
+\DoxyCodeLine{00095\ \ \ \ \ \textcolor{keywordtype}{double}\ lat\ =\ 0.0;}
+\DoxyCodeLine{00096\ \ \ \ \ \textcolor{keywordtype}{double}\ lon\ =\ 0.0;}
+\DoxyCodeLine{00097\ \ \ \ \ \textcolor{keywordtype}{double}\ alt\ =\ 0.0;}
+\DoxyCodeLine{00098\ \ \ \ \ \textcolor{keywordtype}{bool}\ is\_set\ =\ \textcolor{keyword}{false};}
+\DoxyCodeLine{00099\ \};}
+\DoxyCodeLine{00100\ }
+\DoxyCodeLine{00101\ \textcolor{comment}{//\ ──\ State\ Output\ ─────────────────────────────────────────────}}
+\DoxyCodeLine{00102\ }
+\DoxyCodeLine{00103\ \textcolor{keyword}{struct\ }\doxymbox{\hyperlink{structnavcore_1_1_e_s_k_f_state}{ESKFState}}\ \{}
+\DoxyCodeLine{00104\ \ \ \ \ Vec3\ pos;\ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ NED\ position\ (m)}}
+\DoxyCodeLine{00105\ \ \ \ \ Vec3\ vel;\ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ NED\ velocity\ (m/s)}}
+\DoxyCodeLine{00106\ \ \ \ \ Vec4\ quat;\ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ [w,\ x,\ y,\ z]}}
+\DoxyCodeLine{00107\ \ \ \ \ Vec3\ euler;\ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ [roll,\ pitch,\ yaw]\ (rad)}}
+\DoxyCodeLine{00108\ \ \ \ \ Vec3\ accel\_bias;\ \ \ \ \textcolor{comment}{//\ m/s²}}
+\DoxyCodeLine{00109\ \ \ \ \ Vec3\ gyro\_bias;\ \ \ \ \ \textcolor{comment}{//\ rad/s}}
+\DoxyCodeLine{00110\ \ \ \ \ \textcolor{keywordtype}{double}\ baro\_bias;\ \ \ \textcolor{comment}{//\ m}}
+\DoxyCodeLine{00111\ \ \ \ \ \textcolor{keywordtype}{double}\ clock\_bias;\ \ \textcolor{comment}{//\ m}}
+\DoxyCodeLine{00112\ \ \ \ \ \textcolor{keywordtype}{double}\ clock\_drift;\ \textcolor{comment}{//\ m/s}}
+\DoxyCodeLine{00113\ \ \ \ \ Eigen::Vector2d\ wind;\ \textcolor{comment}{//\ [north,\ east]\ m/s}}
+\DoxyCodeLine{00114\ \};}
+\DoxyCodeLine{00115\ }
+\DoxyCodeLine{00116\ \textcolor{comment}{//\ ──\ ESKF\ Core\ Class\ ──────────────────────────────────────────}}
+\DoxyCodeLine{00117\ }
+\DoxyCodeLine{00118\ \textcolor{keyword}{class\ }ESKFCore\ \{}
+\DoxyCodeLine{00119\ \textcolor{keyword}{public}:}
+\DoxyCodeLine{00120\ \ \ \ \ \textcolor{keyword}{explicit}\ ESKFCore(\textcolor{keyword}{const}\ \doxymbox{\hyperlink{structnavcore_1_1_i_m_u_noise_params}{IMUNoiseParams}}\&\ noise);}
+\DoxyCodeLine{00121\ \ \ \ \ \string~ESKFCore()\ =\ \textcolor{keywordflow}{default};}
+\DoxyCodeLine{00122\ }
+\DoxyCodeLine{00123\ \ \ \ \ \textcolor{comment}{//\ Non-\/copyable,\ movable}}
+\DoxyCodeLine{00124\ \ \ \ \ ESKFCore(\textcolor{keyword}{const}\ ESKFCore\&)\ =\ \textcolor{keyword}{delete};}
+\DoxyCodeLine{00125\ \ \ \ \ ESKFCore\&\ operator=(\textcolor{keyword}{const}\ ESKFCore\&)\ =\ \textcolor{keyword}{delete};}
+\DoxyCodeLine{00126\ \ \ \ \ ESKFCore(ESKFCore\&\&)\ =\ \textcolor{keywordflow}{default};}
+\DoxyCodeLine{00127\ \ \ \ \ ESKFCore\&\ operator=(ESKFCore\&\&)\ =\ \textcolor{keywordflow}{default};}
+\DoxyCodeLine{00128\ }
+\DoxyCodeLine{00129\ \ \ \ \ \textcolor{comment}{//\ ──\ Core\ Operations\ ─────────────────────────────────────}}
+\DoxyCodeLine{00130\ }
+\DoxyCodeLine{00131\ \ \ \ \ \textcolor{keywordtype}{void}\ predict(\textcolor{keyword}{const}\ Vec3\&\ accel,\ \textcolor{keyword}{const}\ Vec3\&\ gyro,\ \textcolor{keywordtype}{double}\ dt);}
+\DoxyCodeLine{00132\ }
+\DoxyCodeLine{00133\ \ \ \ \ \textcolor{keywordtype}{void}\ update\_baro(\textcolor{keywordtype}{double}\ alt\_m);}
+\DoxyCodeLine{00134\ }
+\DoxyCodeLine{00135\ \ \ \ \ \textcolor{keywordtype}{void}\ update\_mag(\textcolor{keywordtype}{double}\ yaw\_measured,\ \textcolor{keywordtype}{double}\ mag\_norm\ =\ -\/1.0,}
+\DoxyCodeLine{00136\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{double}\ t\_now\ =\ 0.0);}
+\DoxyCodeLine{00137\ }
+\DoxyCodeLine{00138\ \ \ \ \ \textcolor{keywordtype}{void}\ update\_optical\_flow(\textcolor{keywordtype}{double}\ flow\_vx,\ \textcolor{keywordtype}{double}\ flow\_vy,}
+\DoxyCodeLine{00139\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{double}\ distance,\ \textcolor{keywordtype}{int}\ quality);}
+\DoxyCodeLine{00140\ }
+\DoxyCodeLine{00145\ \ \ \ \ \textcolor{keywordtype}{bool}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_a3721fc13e9a2417c386f1fc944722654}{update\_external}}(\textcolor{keyword}{const}\ VecXd\&\ z,\ \textcolor{keyword}{const}\ VecXd\&\ z\_pred,}
+\DoxyCodeLine{00146\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{const}\ MatXd\&\ H,\ \textcolor{keyword}{const}\ MatXd\&\ R,}
+\DoxyCodeLine{00147\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{const}\ std::string\&\ source\ =\ \textcolor{stringliteral}{"{}external"{}});}
+\DoxyCodeLine{00148\ }
+\DoxyCodeLine{00152\ \ \ \ \ \textcolor{keywordtype}{void}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_aaf3c70ccbb89d16f8e3b014613cf16e0}{update\_gps}}(\textcolor{keywordtype}{double}\ lat,\ \textcolor{keywordtype}{double}\ lon,\ \textcolor{keywordtype}{double}\ alt,\ \textcolor{keywordtype}{double}\ hdop\ =\ 1.0);}
+\DoxyCodeLine{00153\ }
+\DoxyCodeLine{00157\ \ \ \ \ \textcolor{keywordtype}{void}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_ae928d281027440b6876900f0d3f1f6c9}{update\_zupt}}();}
+\DoxyCodeLine{00158\ }
+\DoxyCodeLine{00162\ \ \ \ \ \textcolor{keywordtype}{void}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_a2f1d2f26c08dd7b75c16658f628e853d}{update\_radar\_velocity}}(\textcolor{keywordtype}{double}\ vx,\ \textcolor{keywordtype}{double}\ vy,\ \textcolor{keywordtype}{double}\ vz,}
+\DoxyCodeLine{00163\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{double}\ weight\ =\ 1.0);}
+\DoxyCodeLine{00164\ }
+\DoxyCodeLine{00168\ \ \ \ \ \textcolor{keywordtype}{void}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_a56128d21c9d5c7bb30a8cf06eeead800}{update\_lidar\_range}}(\textcolor{keywordtype}{double}\ distance,\ \textcolor{keywordtype}{double}\ weight\ =\ 1.0);}
+\DoxyCodeLine{00169\ }
+\DoxyCodeLine{00173\ \ \ \ \ \textcolor{keywordtype}{void}\ \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_a070d8f3e073b6914067414f8fc95b0fd}{scale\_process\_noise}}(\textcolor{keywordtype}{double}\ vibration\_level);}
+\DoxyCodeLine{00174\ }
+\DoxyCodeLine{00175\ \ \ \ \ \textcolor{keywordtype}{bool}\ initialize\_from\_sensors(\textcolor{keyword}{const}\ Eigen::MatrixXd\&\ accel\_samples,}
+\DoxyCodeLine{00176\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{const}\ Eigen::MatrixXd\&\ mag\_samples);}
+\DoxyCodeLine{00177\ }
+\DoxyCodeLine{00178\ \ \ \ \ \textcolor{keywordtype}{void}\ reset();}
+\DoxyCodeLine{00179\ }
+\DoxyCodeLine{00180\ \ \ \ \ \textcolor{comment}{//\ ──\ Accessors\ ───────────────────────────────────────────}}
+\DoxyCodeLine{00181\ }
+\DoxyCodeLine{00182\ \ \ \ \ \doxymbox{\hyperlink{structnavcore_1_1_e_s_k_f_state}{ESKFState}}\ get\_state()\ \textcolor{keyword}{const};}
+\DoxyCodeLine{00183\ \ \ \ \ EKFHealth\ get\_health()\textcolor{keyword}{\ const\ }\{\ \textcolor{keywordflow}{return}\ health\_;\ \}}
+\DoxyCodeLine{00184\ \ \ \ \ \textcolor{keyword}{const}\ MatP\&\ get\_covariance()\textcolor{keyword}{\ const\ }\{\ P\_cached\_\ =\ U\_.transpose()\ *\ U\_;\ \textcolor{keywordflow}{return}\ P\_cached\_;\ \}}
+\DoxyCodeLine{00185\ \ \ \ \ \textcolor{keywordtype}{bool}\ is\_initialized()\textcolor{keyword}{\ const\ }\{\ \textcolor{keywordflow}{return}\ initialized\_;\ \}}
+\DoxyCodeLine{00186\ \ \ \ \ \textcolor{keywordtype}{double}\ get\_baro\_bias()\textcolor{keyword}{\ const\ }\{\ \textcolor{keywordflow}{return}\ baro\_bias\_;\ \}}
+\DoxyCodeLine{00187\ \ \ \ \ \textcolor{keywordtype}{double}\ get\_vibration\_scale()\textcolor{keyword}{\ const\ }\{\ \textcolor{keywordflow}{return}\ vibration\_scale\_;\ \}}
+\DoxyCodeLine{00188\ }
+\DoxyCodeLine{00189\ \textcolor{keyword}{private}:}
+\DoxyCodeLine{00190\ \ \ \ \ \textcolor{comment}{//\ ──\ Internal\ Methods\ ────────────────────────────────────}}
+\DoxyCodeLine{00191\ }
+\DoxyCodeLine{00192\ \ \ \ \ \textcolor{keywordtype}{void}\ inject\_error(\textcolor{keyword}{const}\ VecE\&\ dx);}
+\DoxyCodeLine{00193\ \ \ \ \ \textcolor{keywordtype}{void}\ harden\_covariance();}
+\DoxyCodeLine{00194\ \ \ \ \ \textcolor{keywordtype}{void}\ check\_health();}
+\DoxyCodeLine{00195\ \ \ \ \ MatF\ compute\_F(\textcolor{keyword}{const}\ Vec3\&\ accel,\ \textcolor{keyword}{const}\ Vec3\&\ gyro,}
+\DoxyCodeLine{00196\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{const}\ Mat3\&\ R,\ \textcolor{keywordtype}{double}\ dt)\ \textcolor{keyword}{const};}
+\DoxyCodeLine{00197\ }
+\DoxyCodeLine{00198\ \ \ \ \ \textcolor{comment}{//\ Quaternion\ utilities}}
+\DoxyCodeLine{00199\ \ \ \ \ \textcolor{keyword}{static}\ Vec4\ quat\_multiply(\textcolor{keyword}{const}\ Vec4\&\ q1,\ \textcolor{keyword}{const}\ Vec4\&\ q2);}
+\DoxyCodeLine{00200\ \ \ \ \ \textcolor{keyword}{static}\ Mat3\ quat\_to\_rotation(\textcolor{keyword}{const}\ Vec4\&\ q);}
+\DoxyCodeLine{00201\ \ \ \ \ \textcolor{keyword}{static}\ Vec3\ quat\_to\_euler(\textcolor{keyword}{const}\ Vec4\&\ q);}
+\DoxyCodeLine{00202\ \ \ \ \ \textcolor{keyword}{static}\ Vec4\ euler\_to\_quat(\textcolor{keywordtype}{double}\ roll,\ \textcolor{keywordtype}{double}\ pitch,\ \textcolor{keywordtype}{double}\ yaw);}
+\DoxyCodeLine{00203\ \ \ \ \ \textcolor{keyword}{static}\ Mat3\ skew\_symmetric(\textcolor{keyword}{const}\ Vec3\&\ v);}
+\DoxyCodeLine{00204\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keywordtype}{double}\ wrap\_angle(\textcolor{keywordtype}{double}\ a);}
+\DoxyCodeLine{00205\ }
+\DoxyCodeLine{00206\ \ \ \ \ \textcolor{comment}{//\ ──\ State\ ───────────────────────────────────────────────}}
+\DoxyCodeLine{00207\ }
+\DoxyCodeLine{00208\ \ \ \ \ VecX\ x\_;\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ Nominal\ state\ (21)}}
+\DoxyCodeLine{00209\ \ \ \ \ MatP\ U\_;\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ Upper\ triangular\ Cholesky\ factor\ of\ covariance\ (20x20)}}
+\DoxyCodeLine{00210\ \ \ \ \ \textcolor{keyword}{mutable}\ MatP\ P\_cached\_;\ \ \ \ \ \textcolor{comment}{//\ Cached\ covariance\ for\ get\_covariance()}}
+\DoxyCodeLine{00211\ \ \ \ \ MatQ\ Q\_base\_;\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ Base\ process\ noise\ (20x20)}}
+\DoxyCodeLine{00212\ \ \ \ \ MatQ\ Q\_;\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ Active\ process\ noise\ (scaled)}}
+\DoxyCodeLine{00213\ \ \ \ \ MatQ\ Q\_sqrt\_;\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ Cholesky\ factor\ of\ Q\_}}
+\DoxyCodeLine{00214\ \ \ \ \ \doxymbox{\hyperlink{structnavcore_1_1_i_m_u_noise_params}{IMUNoiseParams}}\ noise\_;}
+\DoxyCodeLine{00215\ \ \ \ \ EKFHealth\ health\_;}
+\DoxyCodeLine{00216\ \ \ \ \ \textcolor{keywordtype}{bool}\ initialized\_;}
+\DoxyCodeLine{00217\ \ \ \ \ \textcolor{keywordtype}{int}\ step\_count\_;}
+\DoxyCodeLine{00218\ }
+\DoxyCodeLine{00219\ \ \ \ \ \textcolor{comment}{//\ Measurement\ matrices}}
+\DoxyCodeLine{00220\ \ \ \ \ Eigen::Matrix<double,\ 1,\ ERROR\_DIM>\ H\_baro\_;}
+\DoxyCodeLine{00221\ \ \ \ \ Eigen::Matrix<double,\ 1,\ ERROR\_DIM>\ H\_mag\_;}
+\DoxyCodeLine{00222\ }
+\DoxyCodeLine{00223\ \ \ \ \ \textcolor{comment}{//\ GPS\ origin}}
+\DoxyCodeLine{00224\ \ \ \ \ \doxymbox{\hyperlink{structnavcore_1_1_g_p_s_origin}{GPSOrigin}}\ gps\_origin\_;}
+\DoxyCodeLine{00225\ }
+\DoxyCodeLine{00226\ \ \ \ \ \textcolor{comment}{//\ Baro\ drift\ compensation}}
+\DoxyCodeLine{00227\ \ \ \ \ \textcolor{keywordtype}{double}\ baro\_bias\_;}
+\DoxyCodeLine{00228\ \ \ \ \ \textcolor{keywordtype}{double}\ baro\_bias\_alpha\_;}
+\DoxyCodeLine{00229\ \ \ \ \ \textcolor{keywordtype}{int}\ baro\_update\_count\_;}
+\DoxyCodeLine{00230\ }
+\DoxyCodeLine{00231\ \ \ \ \ \textcolor{comment}{//\ Mag\ auto-\/calibration}}
+\DoxyCodeLine{00232\ \ \ \ \ \textcolor{keywordtype}{double}\ calibrated\_mag\_norm\_;}
+\DoxyCodeLine{00233\ \ \ \ \ \textcolor{keywordtype}{double}\ mag\_reject\_until\_;}
+\DoxyCodeLine{00234\ \ \ \ \ \textcolor{keywordtype}{int}\ mag\_consecutive\_good\_;}
+\DoxyCodeLine{00235\ }
+\DoxyCodeLine{00236\ \ \ \ \ \textcolor{comment}{//\ Adaptive\ noise}}
+\DoxyCodeLine{00237\ \ \ \ \ \textcolor{keywordtype}{double}\ vibration\_scale\_;}
+\DoxyCodeLine{00238\ }
+\DoxyCodeLine{00239\ \ \ \ \ \textcolor{comment}{//\ Safety\ bounds}}
+\DoxyCodeLine{00240\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ VEL\_WARN\ =\ 30.0;}
+\DoxyCodeLine{00241\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ VEL\_FAULT\ =\ 100.0;}
+\DoxyCodeLine{00242\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ TILT\_WARN\_DEG\ =\ 60.0;}
+\DoxyCodeLine{00243\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ TILT\_FAULT\_DEG\ =\ 80.0;}
+\DoxyCodeLine{00244\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ P\_TRACE\_LIMIT\ =\ 1e9;}
+\DoxyCodeLine{00245\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ ACCEL\_BIAS\_LIMIT\ =\ 2.0;}
+\DoxyCodeLine{00246\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ GYRO\_BIAS\_LIMIT\ =\ 0.1;}
+\DoxyCodeLine{00247\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ MAG\_NORM\_TOLERANCE\ =\ 0.30;}
+\DoxyCodeLine{00248\ \ \ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{double}\ MAG\_REJECT\_DURATION\ =\ 2.0;}
+\DoxyCodeLine{00249\ \};}
+\DoxyCodeLine{00250\ }
+\DoxyCodeLine{00251\ \}\ \textcolor{comment}{//\ namespace\ navcore}}
+
+\end{DoxyCode}

@@ -1,0 +1,20 @@
+\doxysection{cpp\+\_\+port/\+src/\+eskf\+\_\+core.cpp File Reference}
+\hypertarget{eskf__core_8cpp}{}\label{eskf__core_8cpp}\index{cpp\_port/src/eskf\_core.cpp@{cpp\_port/src/eskf\_core.cpp}}
+
+
+C++ implementation of the ESKF.  
+
+
+{\ttfamily \+\#include "{}eskf\+\_\+core.\+hpp"{}}\newline
+{\ttfamily \+\#include $<$algorithm$>$}\newline
+{\ttfamily \+\#include $<$cmath$>$}\newline
+{\ttfamily \+\#include $<$iostream$>$}\newline
+{\ttfamily \+\#include $<$cassert$>$}\newline
+
+
+\doxysubsection{Detailed Description}
+C++ implementation of the ESKF. 
+
+Ported from Python for performance.
+
+Everything the Python version does, this does too:\+ GPS, baro, mag, lidar, radar, optical flow, ZUPT, OOSM, the works. Optimized for high-\/frequency execution on embedded targets. 

@@ -9,6 +9,7 @@ from core.eskf import ESKF
 
 log = logging.getLogger("vis_inj")
 
+
 class VisPosInj:
     # Injection rate
     HZ = 30
@@ -38,5 +39,5 @@ class VisPosInj:
                 self.bridge.send_vision_position(pos, np.zeros(4))
             except Exception as e:
                 log.warning(f"Failed to send vision position: {e}")
-            
+
             time.sleep(max(0.0, interval - (time.monotonic() - t0)))

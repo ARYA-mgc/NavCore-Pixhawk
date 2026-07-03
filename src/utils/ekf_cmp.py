@@ -19,12 +19,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 @dataclass
 class StateSnapshot:
     t: float
-    pos: np.ndarray   # (3,)
-    vel: np.ndarray   # (3,)
+    pos: np.ndarray  # (3,)
+    vel: np.ndarray  # (3,)
     euler: np.ndarray  # (3,) [roll, pitch, yaw] radians
 
 
 # ── Loaders ──────────────────────────────────────────────────
+
 
 def load_eskf_jsonl(path: str) -> List[StateSnapshot]:
     # grab our filter's output from the log
@@ -42,12 +43,14 @@ def load_eskf_jsonl(path: str) -> List[StateSnapshot]:
                 if rec.get("type") != "STATE":
                     continue
                 s = rec["state"]
-                states.append(StateSnapshot(
-                    t=rec["t"],
-                    pos=np.array(s["pos"]),
-                    vel=np.array(s["vel"]),
-                    euler=np.array(s["euler"])
-                ))
+                states.append(
+                    StateSnapshot(
+                        t=rec["t"],
+                        pos=np.array(s["pos"]),
+                        vel=np.array(s["vel"]),
+                        euler=np.array(s["euler"]),
+                    )
+                )
             except (json.JSONDecodeError, KeyError):
                 continue
 
@@ -62,18 +65,20 @@ def load_ekf3_csv(path: str) -> List[StateSnapshot]:
         reader = csv.DictReader(f)
         for row in reader:
             try:
-                states.append(StateSnapshot(
-                    t=float(row["time_s"]),
-                    pos=np.array([float(row["x_m"]),
-                                  float(row["y_m"]),
-                                  float(row["z_m"])]),
-                    vel=np.array([float(row["vx"]),
-                                  float(row["vy"]),
-                                  float(row["vz"])]),
-                    euler=np.radians([float(row["roll"]),
-                                      float(row["pitch"]),
-                                      float(row["yaw"])])
-                ))
+                states.append(
+                    StateSnapshot(
+                        t=float(row["time_s"]),
+                        pos=np.array(
+                            [float(row["x_m"]), float(row["y_m"]), float(row["z_m"])]
+                        ),
+                        vel=np.array(
+                            [float(row["vx"]), float(row["vy"]), float(row["vz"])]
+                        ),
+                        euler=np.radians(
+                            [float(row["roll"]), float(row["pitch"]), float(row["yaw"])]
+                        ),
+                    )
+                )
             except (KeyError, ValueError) as e:
                 log.warning(f"Skipping malformed EKF3 row: {e}")
                 continue
@@ -84,9 +89,10 @@ def load_ekf3_csv(path: str) -> List[StateSnapshot]:
 
 # ── Alignment ────────────────────────────────────────────────
 
-def align_states(eskf: List[StateSnapshot],
-                 ekf3: List[StateSnapshot],
-                 max_dt: float = 0.05) -> List[Tuple[StateSnapshot, StateSnapshot]]:
+
+def align_states(
+    eskf: List[StateSnapshot], ekf3: List[StateSnapshot], max_dt: float = 0.05
+) -> List[Tuple[StateSnapshot, StateSnapshot]]:
     # line up both filters' data by time
     pairs = []
     ekf3_times = np.array([s.t for s in ekf3])
@@ -102,6 +108,7 @@ def align_states(eskf: List[StateSnapshot],
 
 # ── Divergence Metrics ──────────────────────────────────────
 
+
 def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict:
     # Compute per-axis divergence between ESKF and EKF3.
     pos_errs = np.array([p[0].pos - p[1].pos for p in pairs])
@@ -109,8 +116,7 @@ def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict
 
     # Wrap yaw difference to [-pi, pi]
     att_errs = np.array([p[0].euler - p[1].euler for p in pairs])
-    att_errs[:, 2] = np.arctan2(np.sin(att_errs[:, 2]),
-                                np.cos(att_errs[:, 2]))
+    att_errs[:, 2] = np.arctan2(np.sin(att_errs[:, 2]), np.cos(att_errs[:, 2]))
 
     pos_norms = np.linalg.norm(pos_errs, axis=1)
     vel_norms = np.linalg.norm(vel_errs, axis=1)
@@ -118,24 +124,24 @@ def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict
 
     results = {
         "position": {
-            "rmse": float(np.sqrt(np.mean(pos_norms ** 2))),
+            "rmse": float(np.sqrt(np.mean(pos_norms**2))),
             "mean": float(np.mean(pos_norms)),
-            "max":  float(np.max(pos_norms)),
+            "max": float(np.max(pos_norms)),
             "per_axis_rmse": {
                 "x": float(np.sqrt(np.mean(pos_errs[:, 0] ** 2))),
                 "y": float(np.sqrt(np.mean(pos_errs[:, 1] ** 2))),
                 "z": float(np.sqrt(np.mean(pos_errs[:, 2] ** 2))),
-            }
+            },
         },
         "velocity": {
-            "rmse": float(np.sqrt(np.mean(vel_norms ** 2))),
+            "rmse": float(np.sqrt(np.mean(vel_norms**2))),
             "mean": float(np.mean(vel_norms)),
-            "max":  float(np.max(vel_norms)),
+            "max": float(np.max(vel_norms)),
         },
         "attitude_deg": {
-            "rmse": float(np.sqrt(np.mean(att_norms ** 2))),
+            "rmse": float(np.sqrt(np.mean(att_norms**2))),
             "mean": float(np.mean(att_norms)),
-            "max":  float(np.max(att_norms)),
+            "max": float(np.max(att_norms)),
         },
         "n_pairs": len(pairs),
         "time_span": float(pairs[-1][0].t - pairs[0][0].t) if pairs else 0,
@@ -146,47 +152,55 @@ def compute_divergence(pairs: List[Tuple[StateSnapshot, StateSnapshot]]) -> dict
 
 def print_comparison(results: dict):
     # show the scoreboard
-    print(f"\n{'='*60}")
-    print(f"ESKF vs EKF3 DIVERGENCE ANALYSIS")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("ESKF vs EKF3 DIVERGENCE ANALYSIS")
+    print(f"{'=' * 60}")
     print(f"  Aligned pairs : {results['n_pairs']}")
     print(f"  Time span     : {results['time_span']:.1f} s")
 
     pos = results["position"]
-    print(f"\nPosition Divergence:")
+    print("\nPosition Divergence:")
     print(f"  RMSE   : {pos['rmse']:.4f} m")
     print(f"  Mean   : {pos['mean']:.4f} m")
     print(f"  Max    : {pos['max']:.4f} m")
-    print(f"  Per-axis RMSE: X={pos['per_axis_rmse']['x']:.4f} "
-          f"Y={pos['per_axis_rmse']['y']:.4f} "
-          f"Z={pos['per_axis_rmse']['z']:.4f} m")
+    print(
+        f"  Per-axis RMSE: X={pos['per_axis_rmse']['x']:.4f} "
+        f"Y={pos['per_axis_rmse']['y']:.4f} "
+        f"Z={pos['per_axis_rmse']['z']:.4f} m"
+    )
 
     vel = results["velocity"]
-    print(f"\nVelocity Divergence:")
+    print("\nVelocity Divergence:")
     print(f"  RMSE   : {vel['rmse']:.4f} m/s")
     print(f"  Mean   : {vel['mean']:.4f} m/s")
     print(f"  Max    : {vel['max']:.4f} m/s")
 
     att = results["attitude_deg"]
-    print(f"\nAttitude Divergence:")
+    print("\nAttitude Divergence:")
     print(f"  RMSE   : {att['rmse']:.2f} deg")
     print(f"  Mean   : {att['mean']:.2f} deg")
     print(f"  Max    : {att['max']:.2f} deg")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 # ── CLI Entry Point ────────────────────────────────────────
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format="%(levelname)s  %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s  %(name)s: %(message)s"
+    )
 
     import argparse
+
     p = argparse.ArgumentParser(description="ESKF vs EKF3 divergence analysis")
     p.add_argument("--eskf", required=True, help="NavCore ESKF JSONL log")
     p.add_argument("--ekf3", required=True, help="ArduPilot EKF3 CSV export")
-    p.add_argument("--max-dt", type=float, default=0.05,
-                   help="Max timestamp difference for alignment (s)")
+    p.add_argument(
+        "--max-dt",
+        type=float,
+        default=0.05,
+        help="Max timestamp difference for alignment (s)",
+    )
     args = p.parse_args()
 
     eskf_states = load_eskf_jsonl(args.eskf)

@@ -16,17 +16,19 @@ log = logging.getLogger("ground_truth_eval")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 
-#  Data Structures 
+#  Data Structures
+
 
 @dataclass
 class Pose:
     t: float
-    pos: np.ndarray    # (3,) xyz NED meters
-    quat: np.ndarray   # (4,) [qw, qx, qy, qz]
-    vel: np.ndarray    # (3,) m/s
+    pos: np.ndarray  # (3,) xyz NED meters
+    quat: np.ndarray  # (4,) [qw, qx, qy, qz]
+    vel: np.ndarray  # (3,) m/s
 
 
-#  Loaders 
+#  Loaders
+
 
 def load_ground_truth_csv(path: str) -> List[Pose]:
     # load the RTK data (the 'right' answer)
@@ -36,16 +38,24 @@ def load_ground_truth_csv(path: str) -> List[Pose]:
         for row in reader:
             try:
                 t = float(row["time_s"])
-                pos = np.array([float(row["x_m"]),
-                                float(row["y_m"]),
-                                float(row["z_m"])])
-                quat = np.array([float(row["qw"]),
-                                 float(row["qx"]),
-                                 float(row["qy"]),
-                                 float(row["qz"])])
-                vel = np.array([float(row.get("vx_mps", 0)),
-                                float(row.get("vy_mps", 0)),
-                                float(row.get("vz_mps", 0))])
+                pos = np.array(
+                    [float(row["x_m"]), float(row["y_m"]), float(row["z_m"])]
+                )
+                quat = np.array(
+                    [
+                        float(row["qw"]),
+                        float(row["qx"]),
+                        float(row["qy"]),
+                        float(row["qz"]),
+                    ]
+                )
+                vel = np.array(
+                    [
+                        float(row.get("vx_mps", 0)),
+                        float(row.get("vy_mps", 0)),
+                        float(row.get("vz_mps", 0)),
+                    ]
+                )
                 poses.append(Pose(t=t, pos=pos, quat=quat, vel=vel))
             except (KeyError, ValueError) as e:
                 log.warning(f"Skipping malformed ground-truth row: {e}")
@@ -71,12 +81,14 @@ def load_estimate_jsonl(path: str) -> List[Pose]:
                 if rec.get("type") != "STATE":
                     continue
                 state = rec["state"]
-                poses.append(Pose(
-                    t=rec["t"],
-                    pos=np.array(state["pos"]),
-                    quat=np.array(state["quat"]),
-                    vel=np.array(state["vel"])
-                ))
+                poses.append(
+                    Pose(
+                        t=rec["t"],
+                        pos=np.array(state["pos"]),
+                        quat=np.array(state["quat"]),
+                        vel=np.array(state["vel"]),
+                    )
+                )
             except (json.JSONDecodeError, KeyError):
                 continue
 
@@ -84,10 +96,12 @@ def load_estimate_jsonl(path: str) -> List[Pose]:
     return poses
 
 
-#  Time Alignment 
+#  Time Alignment
 
-def align_timestamps(est: List[Pose], gt: List[Pose],
-                     max_dt: float = 0.05) -> List[Tuple[Pose, Pose]]:
+
+def align_timestamps(
+    est: List[Pose], gt: List[Pose], max_dt: float = 0.05
+) -> List[Tuple[Pose, Pose]]:
     # Associate estimate poses to ground-truth poses by nearest
     pairs = []
     gt_times = np.array([p.t for p in gt])
@@ -102,10 +116,12 @@ def align_timestamps(est: List[Pose], gt: List[Pose],
     return pairs
 
 
-#  Umeyama Alignment 
+#  Umeyama Alignment
 
-def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
-                      with_scale: bool = False) -> Tuple[np.ndarray, np.ndarray, float]:
+
+def umeyama_alignment(
+    src: np.ndarray, dst: np.ndarray, with_scale: bool = False
+) -> Tuple[np.ndarray, np.ndarray, float]:
     # Umeyama alignment: find R, t, s such that dst ≈ s*R*src + t.
     assert src.shape == dst.shape
     n, m = src.shape
@@ -116,7 +132,7 @@ def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
     src_demean = src - mu_src
     dst_demean = dst - mu_dst
 
-    sigma_src = np.sum(src_demean ** 2) / n
+    sigma_src = np.sum(src_demean**2) / n
     cov = dst_demean.T @ src_demean / n
 
     U, D, Vt = np.linalg.svd(cov)
@@ -132,13 +148,13 @@ def umeyama_alignment(src: np.ndarray, dst: np.ndarray,
     return R, t, s
 
 
-#  Error Metrics 
+#  Error Metrics
 
-def compute_ape(pairs: List[Tuple[Pose, Pose]],
-                align: bool = True) -> dict:
+
+def compute_ape(pairs: List[Tuple[Pose, Pose]], align: bool = True) -> dict:
     # Compute Absolute Pose Error (APE).
     est_pos = np.array([p[0].pos for p in pairs])
-    gt_pos  = np.array([p[1].pos for p in pairs])
+    gt_pos = np.array([p[1].pos for p in pairs])
 
     if align and len(pairs) >= 3:
         R, t, s = umeyama_alignment(est_pos, gt_pos, with_scale=False)
@@ -149,17 +165,16 @@ def compute_ape(pairs: List[Tuple[Pose, Pose]],
     errors = np.linalg.norm(est_aligned - gt_pos, axis=1)
 
     return {
-        "rmse":   float(np.sqrt(np.mean(errors ** 2))),
-        "mean":   float(np.mean(errors)),
+        "rmse": float(np.sqrt(np.mean(errors**2))),
+        "mean": float(np.mean(errors)),
         "median": float(np.median(errors)),
-        "max":    float(np.max(errors)),
-        "std":    float(np.std(errors)),
+        "max": float(np.max(errors)),
+        "std": float(np.std(errors)),
         "errors": errors,
     }
 
 
-def compute_rpe(pairs: List[Tuple[Pose, Pose]],
-                delta: int = 10) -> dict:
+def compute_rpe(pairs: List[Tuple[Pose, Pose]], delta: int = 10) -> dict:
     # Compute Relative Pose Error (RPE) at fixed index intervals.
     if len(pairs) <= delta:
         log.warning(f"Not enough pairs for RPE with delta={delta}")
@@ -176,56 +191,62 @@ def compute_rpe(pairs: List[Tuple[Pose, Pose]],
         err = np.linalg.norm(est_rel - gt_rel)
         errors.append(err)
 
-    errors = np.array(errors)
+    errors = np.array(errors)  # type: ignore
 
     return {
-        "rmse":   float(np.sqrt(np.mean(errors ** 2))),
-        "mean":   float(np.mean(errors)),
+        "rmse": float(np.sqrt(np.mean(errors**2))),  # type: ignore
+        "mean": float(np.mean(errors)),
         "median": float(np.median(errors)),
-        "max":    float(np.max(errors)),
-        "std":    float(np.std(errors)),
+        "max": float(np.max(errors)),
+        "std": float(np.std(errors)),
     }
 
 
 def print_results(ape: dict, rpe: dict):
     # print the report card
-    print(f"\n{'='*60}")
-    print(f"GROUND TRUTH EVALUATION RESULTS")
-    print(f"{'='*60}")
-    print(f"\nAbsolute Pose Error (APE):")
+    print(f"\n{'=' * 60}")
+    print("GROUND TRUTH EVALUATION RESULTS")
+    print(f"{'=' * 60}")
+    print("\nAbsolute Pose Error (APE):")
     print(f"  RMSE   : {ape['rmse']:.4f} m")
     print(f"  Mean   : {ape['mean']:.4f} m")
     print(f"  Median : {ape['median']:.4f} m")
     print(f"  Max    : {ape['max']:.4f} m")
     print(f"  Std    : {ape['std']:.4f} m")
-    print(f"\nRelative Pose Error (RPE):")
+    print("\nRelative Pose Error (RPE):")
     print(f"  RMSE   : {rpe['rmse']:.4f} m")
     print(f"  Mean   : {rpe['mean']:.4f} m")
     print(f"  Median : {rpe['median']:.4f} m")
     print(f"  Max    : {rpe['max']:.4f} m")
     print(f"  Std    : {rpe['std']:.4f} m")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
-#  CLI Entry Point 
+#  CLI Entry Point
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format="%(levelname)s  %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s  %(name)s: %(message)s"
+    )
 
     import argparse
+
     p = argparse.ArgumentParser(description="Ground truth trajectory evaluation")
     p.add_argument("--est", required=True, help="ESKF estimate JSONL log")
-    p.add_argument("--gt",  required=True, help="Ground truth CSV file")
-    p.add_argument("--max-dt", type=float, default=0.05,
-                   help="Max timestamp difference for alignment (s)")
-    p.add_argument("--rpe-delta", type=int, default=10,
-                   help="Index interval for RPE computation")
-    p.add_argument("--no-align", action="store_true",
-                   help="Skip Umeyama alignment")
+    p.add_argument("--gt", required=True, help="Ground truth CSV file")
+    p.add_argument(
+        "--max-dt",
+        type=float,
+        default=0.05,
+        help="Max timestamp difference for alignment (s)",
+    )
+    p.add_argument(
+        "--rpe-delta", type=int, default=10, help="Index interval for RPE computation"
+    )
+    p.add_argument("--no-align", action="store_true", help="Skip Umeyama alignment")
     args = p.parse_args()
 
-    gt_poses  = load_ground_truth_csv(args.gt)
+    gt_poses = load_ground_truth_csv(args.gt)
     est_poses = load_estimate_jsonl(args.est)
 
     if not gt_poses or not est_poses:

@@ -23,30 +23,31 @@ This module implements the safety state machine and orchestrates fallback behavi
 - **Logging:** Every transition to `PREDICTIVE_FAIL` is logged via `logging.critical` alongside the name of the specific sensor that triggered the MLP, providing the necessary audit trail to evaluate the model's predictive value.
 """
 
-import time
 import logging
 from enum import Enum, auto
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Dict
 
 log = logging.getLogger("fault_manager")
 
 
 class FlightMode(Enum):
     # Current flight mode.
-    NOMINAL    = auto()   # All sensors healthy, full ESKF
-    DEGRADED   = auto()   # Some sensors missing, reduced accuracy
-    FAILSAFE   = auto()   # Critical sensor loss, dead-reckoning only
-    PREDICTIVE_FAIL = auto() # ML anomaly detector flagged unusual sensor/filter behaviour
-    EMERGENCY  = auto()   # Estimator diverged, request land/disarm
+    NOMINAL = auto()  # All sensors healthy, full ESKF
+    DEGRADED = auto()  # Some sensors missing, reduced accuracy
+    FAILSAFE = auto()  # Critical sensor loss, dead-reckoning only
+    PREDICTIVE_FAIL = (
+        auto()
+    )  # ML anomaly detector flagged unusual sensor/filter behaviour
+    EMERGENCY = auto()  # Estimator diverged, request land/disarm
 
 
 class SensorStatus(Enum):
     # Sensor health status.
-    ACTIVE    = auto()
-    STALE     = auto()   # No data for > timeout
-    REJECTED  = auto()   # Data arriving but failing quality checks
-    OFFLINE   = auto()   # Explicitly disabled or hardware fault
+    ACTIVE = auto()
+    STALE = auto()  # No data for > timeout
+    REJECTED = auto()  # Data arriving but failing quality checks
+    OFFLINE = auto()  # Explicitly disabled or hardware fault
 
 
 @dataclass
@@ -105,11 +106,11 @@ class FaultManager:
 
         # Sensor health tracking
         self.sensors: Dict[str, SensorHealth] = {
-            "imu":    SensorHealth("imu",    timeout_s=0.1),   # 100 Hz expected
-            "baro":   SensorHealth("baro",   timeout_s=1.0),   # 1-10 Hz
-            "mag":    SensorHealth("mag",    timeout_s=2.0),   # 1-5 Hz
-            "flow":   SensorHealth("flow",   timeout_s=1.0),   # optional
-            "gps":    SensorHealth("gps",    timeout_s=5.0),   # optional
+            "imu": SensorHealth("imu", timeout_s=0.1),  # 100 Hz expected
+            "baro": SensorHealth("baro", timeout_s=1.0),  # 1-10 Hz
+            "mag": SensorHealth("mag", timeout_s=2.0),  # 1-5 Hz
+            "flow": SensorHealth("flow", timeout_s=1.0),  # optional
+            "gps": SensorHealth("gps", timeout_s=5.0),  # optional
         }
 
     @property
@@ -120,8 +121,7 @@ class FaultManager:
     def mode_name(self) -> str:
         return self._mode.name
 
-    def report_sensor_update(self, sensor_name: str, t: float,
-                             rejected: bool = False):
+    def report_sensor_update(self, sensor_name: str, t: float, rejected: bool = False):
         # Handle sensor update.
         if sensor_name not in self.sensors:
             return
@@ -132,8 +132,9 @@ class FaultManager:
         else:
             sh.mark_active(t)
 
-    def update(self, t_now: float, ekf_healthy: bool,
-               safety_ok: bool, ml_fault: str = "") -> FlightMode:
+    def update(
+        self, t_now: float, ekf_healthy: bool, safety_ok: bool, ml_fault: str = ""
+    ) -> FlightMode:
         self._last_ml_fault = ml_fault
         # Evaluate system health and determine operating mode.
         # Check sensor staleness
@@ -144,16 +145,19 @@ class FaultManager:
         for sh in self.sensors.values():
             if sh.dropout_count > self.MAX_DROPOUT_BEFORE_OFFLINE:
                 if sh.status != SensorStatus.OFFLINE:
-                    log.error(f"Sensor {sh.name} declared OFFLINE "
-                              f"after {sh.dropout_count} dropouts")
+                    log.error(
+                        f"Sensor {sh.name} declared OFFLINE "
+                        f"after {sh.dropout_count} dropouts"
+                    )
                     sh.status = SensorStatus.OFFLINE
 
         # Count active critical sensors
-        imu_ok  = self.sensors["imu"].status == SensorStatus.ACTIVE
-        baro_ok = self.sensors["baro"].status in (SensorStatus.ACTIVE,
-                                                   SensorStatus.STALE)
-        mag_ok  = self.sensors["mag"].status in (SensorStatus.ACTIVE,
-                                                  SensorStatus.STALE)
+        imu_ok = self.sensors["imu"].status == SensorStatus.ACTIVE
+        baro_ok = self.sensors["baro"].status in (
+            SensorStatus.ACTIVE,
+            SensorStatus.STALE,
+        )
+        mag_ok = self.sensors["mag"].status in (SensorStatus.ACTIVE, SensorStatus.STALE)
 
         # Determine target mode
         target_mode = self._evaluate_mode(
@@ -175,8 +179,15 @@ class FaultManager:
 
         return self._mode
 
-    def _evaluate_mode(self, imu_ok: bool, baro_ok: bool, mag_ok: bool,
-                       ekf_healthy: bool, safety_ok: bool, ml_fault: str) -> FlightMode:
+    def _evaluate_mode(
+        self,
+        imu_ok: bool,
+        baro_ok: bool,
+        mag_ok: bool,
+        ekf_healthy: bool,
+        safety_ok: bool,
+        ml_fault: str,
+    ) -> FlightMode:
         # EMERGENCY: no IMU or estimator diverged
         if not imu_ok:
             return FlightMode.EMERGENCY
@@ -194,7 +205,7 @@ class FaultManager:
 
         # MLP vs RAIM Disagreement Policy Enforcement:
         # If we reach here, RAIM and watchdogs say all sensors are healthy (NOMINAL or DEGRADED).
-        # If MLP predicts a fault, we downgrade to PREDICTIVE_FAIL to warn GCS, but we DO NOT 
+        # If MLP predicts a fault, we downgrade to PREDICTIVE_FAIL to warn GCS, but we DO NOT
         # escalate to FAILSAFE or EMERGENCY, because the neural network lacks certification authority.
         if ml_fault:
             return FlightMode.PREDICTIVE_FAIL
@@ -212,16 +223,19 @@ class FaultManager:
         self._mode_entry_t = t
 
         severity = {
-            FlightMode.NOMINAL:   "INFO",
-            FlightMode.DEGRADED:  "WARNING",
-            FlightMode.FAILSAFE:  "ERROR",
+            FlightMode.NOMINAL: "INFO",
+            FlightMode.DEGRADED: "WARNING",
+            FlightMode.FAILSAFE: "ERROR",
             FlightMode.PREDICTIVE_FAIL: "CRITICAL",
             FlightMode.EMERGENCY: "CRITICAL",
         }
 
-        msg = (f"FAULT MANAGER: {self._prev_mode.name} → {new_mode.name} "
-               f"at t={t:.2f}s")
-        if new_mode == FlightMode.PREDICTIVE_FAIL and hasattr(self, '_last_ml_fault') and self._last_ml_fault:
+        msg = f"FAULT MANAGER: {self._prev_mode.name} → {new_mode.name} at t={t:.2f}s"
+        if (
+            new_mode == FlightMode.PREDICTIVE_FAIL
+            and hasattr(self, "_last_ml_fault")
+            and self._last_ml_fault
+        ):
             msg += f" [Trigger: MLP anomaly on {self._last_ml_fault}]"
 
         level = getattr(logging, severity.get(new_mode, "INFO"))

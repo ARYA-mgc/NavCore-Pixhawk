@@ -12,12 +12,12 @@ from collections import deque
 log = logging.getLogger("gps_tight")
 
 # GPS constants
-C_LIGHT = 299792458.0         # speed of light (m/s)
-F_L1 = 1575.42e6              # GPS L1 frequency (Hz)
-LAMBDA_L1 = C_LIGHT / F_L1   # L1 wavelength (m)
-OMEGA_E = 7.2921151467e-5     # Earth rotation rate (rad/s)
-R_EARTH = 6371000.0           # mean Earth radius (m)
-GM = 3.986005e14              # gravitational parameter (m³/s²)
+C_LIGHT = 299792458.0  # speed of light (m/s)
+F_L1 = 1575.42e6  # GPS L1 frequency (Hz)
+LAMBDA_L1 = C_LIGHT / F_L1  # L1 wavelength (m)
+OMEGA_E = 7.2921151467e-5  # Earth rotation rate (rad/s)
+R_EARTH = 6371000.0  # mean Earth radius (m)
+GM = 3.986005e14  # gravitational parameter (m³/s²)
 
 # Chi-squared gating threshold for per-satellite rejection
 CHI2_1DOF = 5.991
@@ -26,24 +26,31 @@ CHI2_1DOF = 5.991
 class SatelliteState:
     """Predicted satellite position and clock bias."""
 
-    def __init__(self, prn: int, pos_ecef: np.ndarray,
-                 vel_ecef: np.ndarray, clock_bias_m: float):
+    def __init__(
+        self, prn: int, pos_ecef: np.ndarray, vel_ecef: np.ndarray, clock_bias_m: float
+    ):
         self.prn = prn
-        self.pos_ecef = pos_ecef      # (3,) meters ECEF
-        self.vel_ecef = vel_ecef      # (3,) m/s ECEF
+        self.pos_ecef = pos_ecef  # (3,) meters ECEF
+        self.vel_ecef = vel_ecef  # (3,) m/s ECEF
         self.clock_bias_m = clock_bias_m  # satellite clock bias in meters
 
 
 class PseudorangeMeasurement:
     """A single pseudorange measurement from one satellite."""
 
-    def __init__(self, prn: int, pseudorange: float, doppler: float,
-                 cn0: float, lock_time: float = 0.0):
+    def __init__(
+        self,
+        prn: int,
+        pseudorange: float,
+        doppler: float,
+        cn0: float,
+        lock_time: float = 0.0,
+    ):
         self.prn = prn
-        self.pseudorange = pseudorange    # meters
-        self.doppler = doppler            # Hz
-        self.cn0 = cn0                    # carrier-to-noise (dBHz)
-        self.lock_time = lock_time        # seconds
+        self.pseudorange = pseudorange  # meters
+        self.doppler = doppler  # Hz
+        self.cn0 = cn0  # carrier-to-noise (dBHz)
+        self.lock_time = lock_time  # seconds
 
 
 class UBXParser:
@@ -89,7 +96,7 @@ class UBXParser:
             # Parse header
             cls = self._buffer[2]
             msg_id = self._buffer[3]
-            length = struct.unpack_from('<H', self._buffer, 4)[0]
+            length = struct.unpack_from("<H", self._buffer, 4)[0]
             total_len = 6 + length + 2  # header + payload + checksum
 
             if len(self._buffer) < total_len:
@@ -102,7 +109,7 @@ class UBXParser:
 
             # Parse RXM-RAWX
             if cls == self.CLASS_RXM and msg_id == self.ID_RAWX:
-                payload = bytes(self._buffer[6:6 + length])
+                payload = bytes(self._buffer[6 : 6 + length])
                 meas = self._parse_rawx(payload)
                 measurements.extend(meas)
 
@@ -128,7 +135,7 @@ class UBXParser:
             return []
 
         # Header: rcvTow(8) + week(2) + leapS(1) + numMeas(1) + ...
-        rcv_tow = struct.unpack_from('<d', payload, 0)[0]
+        rcv_tow = struct.unpack_from("<d", payload, 0)[0]
         num_meas = payload[11]
 
         measurements = []
@@ -138,32 +145,35 @@ class UBXParser:
             if offset + self.MEAS_BLOCK_SIZE > len(payload):
                 break
 
-            block = payload[offset:offset + self.MEAS_BLOCK_SIZE]
+            block = payload[offset : offset + self.MEAS_BLOCK_SIZE]
             # prMeas(8) + cpMeas(8) + doMeas(4) + gnssId(1) + svId(1) +
             # sigId(1) + freqId(1) + locktime(2) + cno(1) + ...
-            pr_meas = struct.unpack_from('<d', block, 0)[0]     # pseudorange (m)
-            do_meas = struct.unpack_from('<f', block, 16)[0]    # doppler (Hz)
+            pr_meas = struct.unpack_from("<d", block, 0)[0]  # pseudorange (m)
+            do_meas = struct.unpack_from("<f", block, 16)[0]  # doppler (Hz)
             gnss_id = block[20]
             sv_id = block[21]
             cno = block[26]
-            lock_time = struct.unpack_from('<H', block, 24)[0] / 1000.0
+            lock_time = struct.unpack_from("<H", block, 24)[0] / 1000.0
 
             # Only use GPS L1 (gnssId=0)
             if gnss_id == 0 and pr_meas > 1e6:
                 prn = sv_id
-                measurements.append(PseudorangeMeasurement(
-                    prn=prn,
-                    pseudorange=pr_meas,
-                    doppler=do_meas,
-                    cn0=float(cno),
-                    lock_time=lock_time,
-                ))
+                measurements.append(
+                    PseudorangeMeasurement(
+                        prn=prn,
+                        pseudorange=pr_meas,
+                        doppler=do_meas,
+                        cn0=float(cno),
+                        lock_time=lock_time,
+                    )
+                )
 
             offset += self.MEAS_BLOCK_SIZE
 
         if measurements:
-            log.debug(f"UBX RXM-RAWX: {len(measurements)} GPS sats "
-                      f"at TOW={rcv_tow:.3f}s")
+            log.debug(
+                f"UBX RXM-RAWX: {len(measurements)} GPS sats at TOW={rcv_tow:.3f}s"
+            )
 
         return measurements
 
@@ -186,17 +196,17 @@ class TightGPSCoupling:
     MIN_CN0 = 25.0  # dBHz
 
     # Pseudorange noise model
-    PR_BASE_STD = 3.0     # m, at CN0=45 dBHz
-    DOPPLER_STD = 0.3     # m/s
+    PR_BASE_STD = 3.0  # m, at CN0=45 dBHz
+    DOPPLER_STD = 0.3  # m/s
 
     def __init__(self, enable: bool = False):
         self._enabled = enable
         self._ubx_parser = UBXParser()
-        self._clock_bias_m = 0.0          # receiver clock bias (meters)
-        self._clock_drift_mps = 0.0       # receiver clock drift (m/s)
+        self._clock_bias_m = 0.0  # receiver clock bias (meters)
+        self._clock_drift_mps = 0.0  # receiver clock drift (m/s)
         self._last_update_t = 0.0
         self._sat_positions: Dict[int, SatelliteState] = {}
-        self._pr_residuals = deque(maxlen=100)
+        self._pr_residuals = deque(maxlen=100)  # type: ignore
         self._update_count = 0
 
         if enable:
@@ -228,8 +238,7 @@ class TightGPSCoupling:
         self._sat_positions = sat_states
 
     def compute_pseudorange_update(
-        self, measurements: List[PseudorangeMeasurement],
-        eskf_pos_ecef: np.ndarray
+        self, measurements: List[PseudorangeMeasurement], eskf_pos_ecef: np.ndarray
     ) -> Optional[dict]:
         """Compute tight-coupled ESKF measurement update from pseudoranges.
 
@@ -253,18 +262,19 @@ class TightGPSCoupling:
             valid_meas.append(m)
 
         if len(valid_meas) < self.MIN_SATS:
-            log.debug(f"Tight GPS: only {len(valid_meas)} valid sats "
-                      f"(need {self.MIN_SATS})")
+            log.debug(
+                f"Tight GPS: only {len(valid_meas)} valid sats (need {self.MIN_SATS})"
+            )
             return None
 
         n = len(valid_meas)
 
         # Build measurement model
         # Each satellite gives: ρ_pred = |pos - sat_pos| + clock_bias
-        z = np.zeros(n)           # measured pseudoranges
-        z_pred = np.zeros(n)      # predicted pseudoranges
-        H = np.zeros((n, 20))     # Jacobian (pos + clock bias states)
-        R = np.zeros((n, n))      # measurement noise
+        z = np.zeros(n)  # measured pseudoranges
+        z_pred = np.zeros(n)  # predicted pseudoranges
+        H = np.zeros((n, 20))  # Jacobian (pos + clock bias states)
+        R = np.zeros((n, n))  # measurement noise
 
         for i, meas in enumerate(valid_meas):
             sat = self._sat_positions[meas.prn]
@@ -313,8 +323,9 @@ class TightGPSCoupling:
             self._clock_bias_m += alpha * mean_residual
 
 
-def ned_to_ecef(ned: np.ndarray, origin_lat: float,
-                origin_lon: float, origin_alt: float) -> np.ndarray:
+def ned_to_ecef(
+    ned: np.ndarray, origin_lat: float, origin_lon: float, origin_alt: float
+) -> np.ndarray:
     """Convert NED position to ECEF for tight coupling using WGS84."""
     lat_rad = math.radians(origin_lat)
     lon_rad = math.radians(origin_lon)
@@ -335,19 +346,23 @@ def ned_to_ecef(ned: np.ndarray, origin_lat: float,
     z0 = (N * (1.0 - e2) + origin_alt) * sin_lat
 
     # NED to ECEF rotation
-    R_ned_ecef = np.array([
-        [-sin_lat * cos_lon, -sin_lon, -cos_lat * cos_lon],
-        [-sin_lat * sin_lon,  cos_lon, -cos_lat * sin_lon],
-        [cos_lat,             0.0,     -sin_lat],
-    ])
+    R_ned_ecef = np.array(
+        [
+            [-sin_lat * cos_lon, -sin_lon, -cos_lat * cos_lon],
+            [-sin_lat * sin_lon, cos_lon, -cos_lat * sin_lon],
+            [cos_lat, 0.0, -sin_lat],
+        ]
+    )
 
     ecef = np.array([x0, y0, z0]) + R_ned_ecef @ ned
     return ecef
 
 
 def generate_simulated_pseudoranges(
-    true_pos_ecef: np.ndarray, n_sats: int = 8,
-    noise_std: float = 3.0, multipath_prob: float = 0.1
+    true_pos_ecef: np.ndarray,
+    n_sats: int = 8,
+    noise_std: float = 3.0,
+    multipath_prob: float = 0.1,
 ) -> tuple:
     """Generate realistic simulated pseudoranges for testing.
 
@@ -365,11 +380,13 @@ def generate_simulated_pseudoranges(
         phi = rng.uniform(-math.pi / 3, math.pi / 3)
         r_sat = 26560000.0  # GPS orbit radius (m)
 
-        sat_pos = np.array([
-            r_sat * math.cos(phi) * math.cos(theta),
-            r_sat * math.cos(phi) * math.sin(theta),
-            r_sat * math.sin(phi),
-        ])
+        sat_pos = np.array(
+            [
+                r_sat * math.cos(phi) * math.cos(theta),
+                r_sat * math.cos(phi) * math.sin(theta),
+                r_sat * math.sin(phi),
+            ]
+        )
         sat_vel = np.array([0.0, 0.0, 0.0])  # simplified
         sat_clock = rng.normal(0, 1.0)  # meters
 
@@ -389,9 +406,13 @@ def generate_simulated_pseudoranges(
         doppler = rng.normal(0, 0.5)  # Hz
         cn0 = rng.uniform(30.0, 50.0)  # dBHz
 
-        measurements.append(PseudorangeMeasurement(
-            prn=prn, pseudorange=pseudorange,
-            doppler=doppler, cn0=cn0,
-        ))
+        measurements.append(
+            PseudorangeMeasurement(
+                prn=prn,
+                pseudorange=pseudorange,  # type: ignore
+                doppler=doppler,
+                cn0=cn0,
+            )
+        )
 
     return measurements, sat_states

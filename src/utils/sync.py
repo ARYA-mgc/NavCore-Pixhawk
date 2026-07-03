@@ -6,6 +6,7 @@ import logging
 
 log = logging.getLogger("time_sync")
 
+
 class TimeSynchronizer:
     def __init__(self, default_dt=0.01):
         self.default_dt = default_dt
@@ -21,12 +22,12 @@ class TimeSynchronizer:
     def compute_dt(self, msg) -> float:
         # figure out exactly how much time passed since last reading
         now_s = time.monotonic()
-        
+
         # Determine current message timestamp (usec)
         msg_time_us = 0
-        if hasattr(msg, 'time_usec') and msg.time_usec > 0:
+        if hasattr(msg, "time_usec") and msg.time_usec > 0:
             msg_time_us = msg.time_usec
-        elif hasattr(msg, 'time_boot_ms') and msg.time_boot_ms > 0:
+        elif hasattr(msg, "time_boot_ms") and msg.time_boot_ms > 0:
             msg_time_us = msg.time_boot_ms * 1000
 
         # Initialization
@@ -41,7 +42,7 @@ class TimeSynchronizer:
         if msg_time_us > 0 and self._last_msg_time_us > 0:
             # Hardware timestamp available
             dt_us = msg_time_us - self._last_msg_time_us
-            
+
             # Handle counter wraparound or weird jumps
             if 0 < dt_us < 1_000_000:  # < 1 second jump
                 dt = dt_us / 1_000_000.0
@@ -55,8 +56,10 @@ class TimeSynchronizer:
             # A more rigorous way is comparing local time to boot time
             sys_dt = now_s - self._last_sys_time_s
             inst_latency = max(0.0, sys_dt - dt)
-            self._moving_avg_latency = (self._alpha * inst_latency + 
-                                       (1 - self._alpha) * self._moving_avg_latency)
+            self._moving_avg_latency = (
+                self._alpha * inst_latency
+                + (1 - self._alpha) * self._moving_avg_latency
+            )
             self.latency_s = self._moving_avg_latency
 
         else:

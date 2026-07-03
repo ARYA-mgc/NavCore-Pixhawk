@@ -12,36 +12,38 @@ log = logging.getLogger("safety_monitor")
 
 class SafetyAction(Enum):
     # Safety action types.
-    NOMINAL = 0           # All clear — inject normally
-    WARN = 1              # Elevated but acceptable — log warning
-    LIMIT = 2             # Apply output limiting (clamp)
-    DISABLE_INJECTION = 3 # Stop sending position to ArduPilot
-    FORCE_DISARM = 4      # Critical — request disarm (emergency disarm)
+    NOMINAL = 0  # All clear — inject normally
+    WARN = 1  # Elevated but acceptable — log warning
+    LIMIT = 2  # Apply output limiting (clamp)
+    DISABLE_INJECTION = 3  # Stop sending position to ArduPilot
+    FORCE_DISARM = 4  # Critical — request disarm (emergency disarm)
 
 
 class SafetyMonitor:
     # Monitors system state for safety violations.
     # Applies configured thresholds to ESKF output.
 
-    def __init__(self,
-                 max_horizontal_vel: float = 30.0,
-                 max_vertical_vel: float = 15.0,
-                 max_tilt_deg: float = 60.0,
-                 max_position_jump: float = 5.0,
-                 geofence_radius: float = 500.0,
-                 geofence_height: float = 120.0):
+    def __init__(
+        self,
+        max_horizontal_vel: float = 30.0,
+        max_vertical_vel: float = 15.0,
+        max_tilt_deg: float = 60.0,
+        max_position_jump: float = 5.0,
+        geofence_radius: float = 500.0,
+        geofence_height: float = 120.0,
+    ):
         # Configurable limits
-        self.max_horizontal_vel = max_horizontal_vel   # m/s
-        self.max_vertical_vel = max_vertical_vel       # m/s
-        self.max_tilt_deg = max_tilt_deg               # degrees
-        self.max_position_jump = max_position_jump     # m (per step)
-        self.geofence_radius = geofence_radius         # m
-        self.geofence_height = geofence_height         # m AGL
+        self.max_horizontal_vel = max_horizontal_vel  # m/s
+        self.max_vertical_vel = max_vertical_vel  # m/s
+        self.max_tilt_deg = max_tilt_deg  # degrees
+        self.max_position_jump = max_position_jump  # m (per step)
+        self.geofence_radius = geofence_radius  # m
+        self.geofence_height = geofence_height  # m AGL
 
         # Hard fault thresholds (non-configurable)
-        self._vel_fault = 100.0    # m/s — physically impossible for multirotor
-        self._tilt_fault = 80.0    # degrees — beyond recovery
-        self._jump_fault = 20.0    # m — EKF has diverged
+        self._vel_fault = 100.0  # m/s — physically impossible for multirotor
+        self._tilt_fault = 80.0  # degrees — beyond recovery
+        self._jump_fault = 20.0  # m — EKF has diverged
 
         # State tracking
         self._last_pos = None
@@ -59,14 +61,15 @@ class SafetyMonitor:
             "disarms": 0,
         }
 
-    def check(self, pos: np.ndarray, vel: np.ndarray,
-              euler_rad: np.ndarray) -> SafetyAction:
+    def check(
+        self, pos: np.ndarray, vel: np.ndarray, euler_rad: np.ndarray
+    ) -> SafetyAction:
         # Check state against limits.
         self.stats["total_checks"] += 1
         violations = []
 
         # --- Velocity check ---
-        horiz_vel = math.sqrt(vel[0]**2 + vel[1]**2)
+        horiz_vel = math.sqrt(vel[0] ** 2 + vel[1] ** 2)
         vert_vel = abs(vel[2])
 
         if horiz_vel > self._vel_fault or vert_vel > self._vel_fault:
@@ -93,19 +96,23 @@ class SafetyMonitor:
                 violations.append(("FAULT_JUMP", SafetyAction.DISABLE_INJECTION))
             elif jump > self.max_position_jump:
                 violations.append(("POS_JUMP", SafetyAction.WARN))
-        self._last_pos = pos.copy()
+        self._last_pos = pos.copy()  # type: ignore
 
         # --- Geofence ---
-        horiz_dist = math.sqrt(pos[0]**2 + pos[1]**2)
+        horiz_dist = math.sqrt(pos[0] ** 2 + pos[1] ** 2)
         if horiz_dist > self.geofence_radius:
             violations.append(("GEOFENCE_H", SafetyAction.LIMIT))
         if abs(pos[2]) > self.geofence_height:
             violations.append(("GEOFENCE_V", SafetyAction.LIMIT))
 
         # --- NaN/Inf check ---
-        if (np.any(np.isnan(pos)) or np.any(np.isnan(vel)) or
-                np.any(np.isnan(euler_rad)) or
-                np.any(np.isinf(pos)) or np.any(np.isinf(vel))):
+        if (
+            np.any(np.isnan(pos))
+            or np.any(np.isnan(vel))
+            or np.any(np.isnan(euler_rad))
+            or np.any(np.isinf(pos))
+            or np.any(np.isinf(vel))
+        ):
             violations.append(("NAN_INF", SafetyAction.DISABLE_INJECTION))
 
         # --- Determine worst action ---
@@ -123,11 +130,15 @@ class SafetyMonitor:
         self._violation_count += 1
 
         # Escalate on sustained violations
-        if (self._consecutive_violations >= self._max_consecutive_for_disable
-                and action.value < SafetyAction.DISABLE_INJECTION.value):
+        if (
+            self._consecutive_violations >= self._max_consecutive_for_disable
+            and action.value < SafetyAction.DISABLE_INJECTION.value
+        ):
             action = SafetyAction.DISABLE_INJECTION
-            log.error(f"Safety: escalated to DISABLE after "
-                      f"{self._consecutive_violations} consecutive violations")
+            log.error(
+                f"Safety: escalated to DISABLE after "
+                f"{self._consecutive_violations} consecutive violations"
+            )
 
         # Log
         violation_names = [v[0] for v in violations]

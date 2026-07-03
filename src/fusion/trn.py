@@ -5,8 +5,7 @@
 import logging
 import math
 import numpy as np
-from typing import Optional, Dict, Tuple
-from collections import deque
+from typing import Optional, Tuple
 
 log = logging.getLogger("trn")
 
@@ -20,8 +19,13 @@ class DEMTile:
       - Custom photogrammetry
     """
 
-    def __init__(self, origin_lat: float, origin_lon: float,
-                 heights: np.ndarray, resolution: float = 30.0):
+    def __init__(
+        self,
+        origin_lat: float,
+        origin_lon: float,
+        heights: np.ndarray,
+        resolution: float = 30.0,
+    ):
         """
         Args:
             origin_lat: latitude of SW corner (degrees)
@@ -64,15 +68,18 @@ class DEMTile:
         h10 = self.heights[r1, c0]
         h11 = self.heights[r1, c1]
 
-        h = (h00 * (1-fr) * (1-fc) +
-             h01 * (1-fr) * fc +
-             h10 * fr * (1-fc) +
-             h11 * fr * fc)
+        h = (
+            h00 * (1 - fr) * (1 - fc)
+            + h01 * (1 - fr) * fc
+            + h10 * fr * (1 - fc)
+            + h11 * fr * fc
+        )
 
         return float(h)
 
-    def get_patch(self, north: float, east: float,
-                  radius_m: float) -> Optional[np.ndarray]:
+    def get_patch(
+        self, north: float, east: float, radius_m: float
+    ) -> Optional[np.ndarray]:
         """Extract a square patch of DEM heights around a position.
 
         Args:
@@ -144,7 +151,7 @@ class TerrainRelativeNavigation:
         self.H_pos[0, 0] = 1.0  # North
         self.H_pos[1, 1] = 1.0  # East
 
-        self.R_pos = np.eye(2) * (self.POS_STD ** 2)
+        self.R_pos = np.eye(2) * (self.POS_STD**2)
 
         if enable:
             log.info("Terrain Relative Navigation enabled")
@@ -153,7 +160,7 @@ class TerrainRelativeNavigation:
     def is_active(self) -> bool:
         return self._enabled and self._dem is not None
 
-    def load_dem(self, dem: DEMTile, origin_ned: np.ndarray = None):
+    def load_dem(self, dem: DEMTile, origin_ned: np.ndarray = None):  # type: ignore
         """Load a DEM tile for terrain matching.
 
         Args:
@@ -163,13 +170,18 @@ class TerrainRelativeNavigation:
         self._dem = dem
         if origin_ned is not None:
             self._dem_origin_ned = origin_ned
-        log.info(f"DEM loaded: {dem.n_rows}x{dem.n_cols} cells @ "
-                 f"{dem.resolution}m resolution")
+        log.info(
+            f"DEM loaded: {dem.n_rows}x{dem.n_cols} cells @ "
+            f"{dem.resolution}m resolution"
+        )
 
-    def process_lidar_scan(self, points: np.ndarray,
-                           current_pos: np.ndarray,
-                           current_alt_agl: float,
-                           t_now: float) -> Optional[dict]:
+    def process_lidar_scan(
+        self,
+        points: np.ndarray,
+        current_pos: np.ndarray,
+        current_alt_agl: float,
+        t_now: float,
+    ) -> Optional[dict]:
         """Process a Livox lidar scan for terrain matching.
 
         Args:
@@ -204,9 +216,10 @@ class TerrainRelativeNavigation:
         # Step 2: Get DEM patch at predicted position
         dem_north = current_pos[0] - self._dem_origin_ned[0]
         dem_east = current_pos[1] - self._dem_origin_ned[1]
-        dem_patch = self._dem.get_patch(
-            dem_north, dem_east,
-            radius_m=self.SEARCH_RADIUS + local_map.shape[0] * self.MAP_RESOLUTION
+        dem_patch = self._dem.get_patch(  # type: ignore
+            dem_north,
+            dem_east,
+            radius_m=self.SEARCH_RADIUS + local_map.shape[0] * self.MAP_RESOLUTION,
         )
         if dem_patch is None:
             return None
@@ -215,8 +228,9 @@ class TerrainRelativeNavigation:
         offset, correlation = self._cross_correlate(local_map, dem_patch)
         if correlation < self.MIN_CORRELATION:
             self._rejected_count += 1
-            log.debug(f"TRN rejected: correlation={correlation:.2f} < "
-                      f"{self.MIN_CORRELATION}")
+            log.debug(
+                f"TRN rejected: correlation={correlation:.2f} < {self.MIN_CORRELATION}"
+            )
             return None
 
         # Step 4: Convert offset to position correction
@@ -229,13 +243,14 @@ class TerrainRelativeNavigation:
 
         # Scale noise by inverse correlation (higher correlation = more trust)
         noise_scale = 1.0 / max(correlation, 0.3)
-        R = self.R_pos * (noise_scale ** 2)
+        R = self.R_pos * (noise_scale**2)
 
         self._update_count += 1
         self._last_update_t = t_now
 
-        log.info(f"TRN match: offset=({dn:.1f}, {de:.1f})m "
-                 f"correlation={correlation:.2f}")
+        log.info(
+            f"TRN match: offset=({dn:.1f}, {de:.1f})m correlation={correlation:.2f}"
+        )
 
         return {
             "type": "TRN",
@@ -247,8 +262,9 @@ class TerrainRelativeNavigation:
             "correlation": correlation,
         }
 
-    def _build_height_map(self, points: np.ndarray,
-                          center: np.ndarray) -> Optional[np.ndarray]:
+    def _build_height_map(
+        self, points: np.ndarray, center: np.ndarray
+    ) -> Optional[np.ndarray]:
         """Build a 2D height map from lidar points.
 
         Grids the points and takes the mean height per cell.
@@ -283,8 +299,9 @@ class TerrainRelativeNavigation:
 
         return height_map
 
-    def _cross_correlate(self, local_map: np.ndarray,
-                         dem_patch: np.ndarray) -> Tuple[np.ndarray, float]:
+    def _cross_correlate(
+        self, local_map: np.ndarray, dem_patch: np.ndarray
+    ) -> Tuple[np.ndarray, float]:
         """Normalized cross-correlation between local height map and DEM.
 
         Returns (offset_pixels, peak_correlation).
@@ -296,7 +313,7 @@ class TerrainRelativeNavigation:
             return np.zeros(2), 0.0
 
         # Interpolate DEM to local map resolution
-        scale = self._dem.resolution / self.MAP_RESOLUTION
+        scale = self._dem.resolution / self.MAP_RESOLUTION  # type: ignore
         if abs(scale - 1.0) > 0.01:
             # Simple nearest-neighbor resampling
             new_h = int(dem_h * scale)
@@ -324,10 +341,14 @@ class TerrainRelativeNavigation:
             return np.zeros(2), 0.0
 
         # Search window
-        search_h = min(dem_resampled.shape[0] - local_h,
-                       int(self.SEARCH_RADIUS / self.MAP_RESOLUTION))
-        search_w = min(dem_resampled.shape[1] - local_w,
-                       int(self.SEARCH_RADIUS / self.MAP_RESOLUTION))
+        search_h = min(
+            dem_resampled.shape[0] - local_h,
+            int(self.SEARCH_RADIUS / self.MAP_RESOLUTION),
+        )
+        search_w = min(
+            dem_resampled.shape[1] - local_w,
+            int(self.SEARCH_RADIUS / self.MAP_RESOLUTION),
+        )
 
         if search_h <= 0 or search_w <= 0:
             return np.zeros(2), 0.0
@@ -350,7 +371,7 @@ class TerrainRelativeNavigation:
                 if c0 + local_w > dem_resampled.shape[1]:
                     continue
 
-                dem_sub = dem_resampled[r0:r0+local_h, c0:c0+local_w]
+                dem_sub = dem_resampled[r0 : r0 + local_h, c0 : c0 + local_w]
                 dem_mean = np.mean(dem_sub)
                 dem_std = np.std(dem_sub)
                 if dem_std < 0.1:

@@ -60,10 +60,9 @@ using MatP    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
 using MatQ    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
 using MatF    = Eigen::Matrix<double, ERROR_DIM, ERROR_DIM>;
 
-constexpr int MAX_OBS_DIM = 6;
-// Dynamic-size types for generic updates, mapped to bounded fixed-size matrix allocation to avoid dynamic memory allocation on the heap.
-using VecXd   = Eigen::Matrix<double, Eigen::Dynamic, 1, 0, MAX_OBS_DIM, 1>;
-using MatXd   = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, MAX_OBS_DIM, ERROR_DIM>;
+// Dynamic-size types for generic updates
+using VecXd   = Eigen::VectorXd;
+using MatXd   = Eigen::MatrixXd;
 
 // ── Noise Parameters ─────────────────────────────────────────
 
@@ -181,7 +180,7 @@ public:
 
     ESKFState get_state() const;
     EKFHealth get_health() const { return health_; }
-    const MatP& get_covariance() const { P_cached_ = U_.transpose() * U_; return P_cached_; }
+    const MatP& get_covariance() const { return P_; }
     bool is_initialized() const { return initialized_; }
     double get_baro_bias() const { return baro_bias_; }
     double get_vibration_scale() const { return vibration_scale_; }
@@ -205,12 +204,10 @@ private:
 
     // ── State ───────────────────────────────────────────────
 
-    VecX x_;                    // Nominal state (21)
-    MatP U_;                    // Upper triangular Cholesky factor of covariance (20x20)
-    mutable MatP P_cached_;     // Cached covariance for get_covariance()
-    MatQ Q_base_;               // Base process noise (20x20)
+    VecX x_;                    // Nominal state (16)
+    MatP P_;                    // Error-state covariance (15x15)
+    MatQ Q_base_;               // Base process noise (15x15)
     MatQ Q_;                    // Active process noise (scaled)
-    MatQ Q_sqrt_;               // Cholesky factor of Q_
     IMUNoiseParams noise_;
     EKFHealth health_;
     bool initialized_;

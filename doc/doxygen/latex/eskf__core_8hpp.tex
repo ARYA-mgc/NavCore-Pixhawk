@@ -1,0 +1,120 @@
+\doxysection{cpp\+\_\+port/\+include/\+eskf\+\_\+core.hpp File Reference}
+\hypertarget{eskf__core_8hpp}{}\label{eskf__core_8hpp}\index{cpp\_port/include/eskf\_core.hpp@{cpp\_port/include/eskf\_core.hpp}}
+
+
+21-\/state ESKF C++ header.  
+
+
+{\ttfamily \+\#include $<$Eigen/\+\+Dense$>$}\newline
+{\ttfamily \+\#include $<$cmath$>$}\newline
+{\ttfamily \+\#include $<$array$>$}\newline
+{\ttfamily \+\#include $<$optional$>$}\newline
+{\ttfamily \+\#include $<$string$>$}\newline
+\doxysubsubsection*{Classes}
+\begin{DoxyCompactItemize}
+\item 
+struct \doxymbox{\hyperlink{structnavcore_1_1_i_m_u_noise_params}{navcore::\+\+IMUNoise\+Params}}
+\item 
+struct \doxymbox{\hyperlink{structnavcore_1_1_g_p_s_origin}{navcore::\+\+GPSOrigin}}
+\item 
+struct \doxymbox{\hyperlink{structnavcore_1_1_e_s_k_f_state}{navcore::\+\+ESKFState}}
+\item 
+class \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core}{navcore::\+\+ESKFCore}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Typedefs}
+\begin{DoxyCompactItemize}
+\item 
+\Hypertarget{eskf__core_8hpp_a7049fd68821d3666bc0c5d297b9f0d98}\label{eskf__core_8hpp_a7049fd68821d3666bc0c5d297b9f0d98} 
+using {\bfseries navcore::\+\+Vec3} = Eigen::\+\+Vector3d
+\item 
+\Hypertarget{eskf__core_8hpp_a75b4e5ccbb884e1eb44709c8dc7833a5}\label{eskf__core_8hpp_a75b4e5ccbb884e1eb44709c8dc7833a5} 
+using {\bfseries navcore::\+\+Vec4} = Eigen::\+\+Vector4d
+\item 
+\Hypertarget{eskf__core_8hpp_adc81e2e77644693f7284e8a9ff14a81c}\label{eskf__core_8hpp_adc81e2e77644693f7284e8a9ff14a81c} 
+using {\bfseries navcore::\+\+VecX} = Eigen::\+\+Matrix$<$double, STATE\+\_\+\+DIM, 1$>$
+\item 
+\Hypertarget{eskf__core_8hpp_acf8135b47f34bcfb65f486e7af853d62}\label{eskf__core_8hpp_acf8135b47f34bcfb65f486e7af853d62} 
+using {\bfseries navcore::\+\+VecE} = Eigen::\+\+Matrix$<$double, ERROR\+\_\+\+DIM, 1$>$
+\item 
+\Hypertarget{eskf__core_8hpp_a3b78c20ab710eb7e77215dc6fcc50fa0}\label{eskf__core_8hpp_a3b78c20ab710eb7e77215dc6fcc50fa0} 
+using {\bfseries navcore::\+\+Mat3} = Eigen::\+\+Matrix3d
+\item 
+\Hypertarget{eskf__core_8hpp_ad9d26674a0e508ccf4bfc9ea76f1bc30}\label{eskf__core_8hpp_ad9d26674a0e508ccf4bfc9ea76f1bc30} 
+using {\bfseries navcore::\+\+Mat4} = Eigen::\+\+Matrix4d
+\item 
+\Hypertarget{eskf__core_8hpp_a927a700da3e09738dec42d32297cbfa9}\label{eskf__core_8hpp_a927a700da3e09738dec42d32297cbfa9} 
+using {\bfseries navcore::\+\+MatP} = Eigen::\+\+Matrix$<$double, ERROR\+\_\+\+DIM, ERROR\+\_\+\+DIM$>$
+\item 
+\Hypertarget{eskf__core_8hpp_a001ca6c9843046e7c63d4f852c4360ae}\label{eskf__core_8hpp_a001ca6c9843046e7c63d4f852c4360ae} 
+using {\bfseries navcore::\+\+MatQ} = Eigen::\+\+Matrix$<$double, ERROR\+\_\+\+DIM, ERROR\+\_\+\+DIM$>$
+\item 
+\Hypertarget{eskf__core_8hpp_adb677a4a70e3377cb893a0446d70aa99}\label{eskf__core_8hpp_adb677a4a70e3377cb893a0446d70aa99} 
+using {\bfseries navcore::\+\+MatF} = Eigen::\+\+Matrix$<$double, ERROR\+\_\+\+DIM, ERROR\+\_\+\+DIM$>$
+\item 
+\Hypertarget{eskf__core_8hpp_ad067aeb0c6c2de2a0119f65cc2661b26}\label{eskf__core_8hpp_ad067aeb0c6c2de2a0119f65cc2661b26} 
+using {\bfseries navcore::\+\+Vec\+Xd} = Eigen::\+\+Matrix$<$double, Eigen::\+\+Dynamic, 1, 0, MAX\+\_\+\+OBS\+\_\+\+DIM, 1$>$
+\item 
+\Hypertarget{eskf__core_8hpp_a8124136d87bbc837fb282132782743de}\label{eskf__core_8hpp_a8124136d87bbc837fb282132782743de} 
+using {\bfseries navcore::\+\+Mat\+Xd} = Eigen::\+\+Matrix$<$double, Eigen::\+\+Dynamic, Eigen::\+\+Dynamic, 0, MAX\+\_\+\+OBS\+\_\+\+DIM, ERROR\+\_\+\+DIM$>$
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Enumerations}
+\begin{DoxyCompactItemize}
+\item 
+\Hypertarget{eskf__core_8hpp_ab11e7f1ee674590aeacab18394962328}\label{eskf__core_8hpp_ab11e7f1ee674590aeacab18394962328} 
+enum class {\bfseries EKFHealth} \{ {\bfseries CONVERGING} = 0
+, {\bfseries HEALTHY} = 1
+, {\bfseries WARNING} = 2
+, {\bfseries FAULT} = 3
+ \}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Variables}
+\begin{DoxyCompactItemize}
+\item 
+\Hypertarget{eskf__core_8hpp_a50698b0ef8bdf57002a30d2c8079204c}\label{eskf__core_8hpp_a50698b0ef8bdf57002a30d2c8079204c} 
+constexpr int {\bfseries navcore::\+\+STATE\+\_\+\+DIM} = 21
+\item 
+\Hypertarget{eskf__core_8hpp_a097b501b855ca8656d9820f580ba527c}\label{eskf__core_8hpp_a097b501b855ca8656d9820f580ba527c} 
+constexpr int {\bfseries navcore::\+\+ERROR\+\_\+\+DIM} = 20
+\item 
+\Hypertarget{eskf__core_8hpp_aa1536c69c657d7943d7a7ad728bd272d}\label{eskf__core_8hpp_aa1536c69c657d7943d7a7ad728bd272d} 
+constexpr double {\bfseries navcore::\+\+GRAVITY} = 9.\+80665
+\item 
+\Hypertarget{eskf__core_8hpp_a2b177bacaa8ae898b39580012f272f92}\label{eskf__core_8hpp_a2b177bacaa8ae898b39580012f272f92} 
+constexpr double {\bfseries navcore::\+\+CHI2\+\_\+1\+DOF} = 3.\+841
+\item 
+\Hypertarget{eskf__core_8hpp_ad10d76ff29b5b775ca81a90274cf6b8e}\label{eskf__core_8hpp_ad10d76ff29b5b775ca81a90274cf6b8e} 
+constexpr double {\bfseries navcore::\+\+CHI2\+\_\+2\+DOF} = 5.\+991
+\item 
+\Hypertarget{eskf__core_8hpp_ad4a41c8719cdfc41d55c59ca5012a571}\label{eskf__core_8hpp_ad4a41c8719cdfc41d55c59ca5012a571} 
+constexpr double {\bfseries navcore::\+\+CHI2\+\_\+3\+DOF} = 7.\+815
+\item 
+\Hypertarget{eskf__core_8hpp_ad13c1a945fcb9aaba612d88d0c27607c}\label{eskf__core_8hpp_ad13c1a945fcb9aaba612d88d0c27607c} 
+constexpr double {\bfseries navcore::\+\+R\+\_\+\+EARTH} = 6371000.\+0
+\item 
+\Hypertarget{eskf__core_8hpp_aca05eca606c408c15386ee7d03441abf}\label{eskf__core_8hpp_aca05eca606c408c15386ee7d03441abf} 
+constexpr double {\bfseries navcore::\+\+Z\+\_\+\+COV\+\_\+\+CONVERGED} = 1.\+5
+\item 
+\Hypertarget{eskf__core_8hpp_a83207666645490bd5c1d0d62fb19f653}\label{eskf__core_8hpp_a83207666645490bd5c1d0d62fb19f653} 
+constexpr int {\bfseries navcore::\+\+MAX\+\_\+\+OBS\+\_\+\+DIM} = 6
+\end{DoxyCompactItemize}
+
+
+\doxysubsection{Detailed Description}
+21-\/state ESKF C++ header. 
+
+Full port of Python eskf.\+py to standalone C++17 + Eigen3. Standalone dependency-\/free implementation. Runs on Raspberry Pi /\+ ARM. Supports SCHED\+\_\+\+FIFO real-\/time scheduling Designed for hard real-\/time execution.
+
+State layout (same as Python version):\+ Nominal (21):\+ \+[pos(3), vel(3), quat(4), accel\+\_\+bias(3), gyro\+\_\+bias(3), baro\+\_\+bias, clk\+\_\+bias, clk\+\_\+drift, wind\+\_\+n, wind\+\_\+e]\+ Error (20):\+ \+[dp(3), dv(3), dtheta(3), dba(3), dbg(3), d\+\_\+baro, d\+\_\+clk, d\+\_\+clk\+\_\+drift, d\+\_\+wind(2)]\+
+
+Features:\+
+\begin{DoxyItemize}
+\item Covariance convergence detection (z\+\_\+cov \texorpdfstring{$<$}{<} 0.\+25 + step \texorpdfstring{$>$}{>} 200)
+\item Adaptive process noise (scales with vibration magnitude)
+\item ZUPT (zero velocity update)
+\item Baro drift compensation (bias estimation)
+\item Mag auto-\/cal (magnetic distortion rejection)
+\item GPS fusion (WGS-\/84 to NED local tangent plane)
+\item Generic external measurements (modular update framework)
+\item Lidar range + radar velocity (high-\/bandwidth relative updates)
+\item Optical flow (GNSS-\/denied velocity tracking) 
+\end{DoxyItemize}

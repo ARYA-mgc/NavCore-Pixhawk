@@ -22,7 +22,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.eskf import ESKF, EKFHealth, NOMINAL_DIM, ERROR_DIM
+from core.eskf import ESKF, EKFHealth
 from utils.noise import IMUNoiseParams
 
 GRAVITY = 9.80665
@@ -31,8 +31,9 @@ GRAVITY = 9.80665
 class RealisticIMU:
     """MEMS IMU with bias random walk, temperature drift, scale factor error."""
 
-    def __init__(self, noise: IMUNoiseParams, rng: np.random.Generator,
-                 temp_drift: bool = True):
+    def __init__(
+        self, noise: IMUNoiseParams, rng: np.random.Generator, temp_drift: bool = True
+    ):
         self.noise = noise
         self.rng = rng
         self.temp_drift = temp_drift
@@ -45,8 +46,12 @@ class RealisticIMU:
         self.gyro_temp_coeff = rng.uniform(-0.0001, 0.0001, 3)
 
     def sample(self, true_accel, true_gyro, dt, t):
-        self.accel_bias += self.rng.normal(0, self.noise.accel_bias_std * math.sqrt(dt), 3)
-        self.gyro_bias += self.rng.normal(0, self.noise.gyro_bias_std * math.sqrt(dt), 3)
+        self.accel_bias += self.rng.normal(
+            0, self.noise.accel_bias_std * math.sqrt(dt), 3
+        )
+        self.gyro_bias += self.rng.normal(
+            0, self.noise.gyro_bias_std * math.sqrt(dt), 3
+        )
         self.accel_bias = np.clip(self.accel_bias, -0.5, 0.5)
         self.gyro_bias = np.clip(self.gyro_bias, -0.02, 0.02)
 
@@ -72,10 +77,10 @@ def make_eskf():
     return eskf, noise
 
 
-#  Pure IMU Drift (no aiding) 
+#  Pure IMU Drift (no aiding)
+
 
 class TestPureIMUDrift:
-
     def _run_pure_imu(self, duration_s, dt=0.01):
         eskf, noise = make_eskf()
         rng = np.random.default_rng(42)
@@ -83,7 +88,7 @@ class TestPureIMUDrift:
         N = int(duration_s / dt)
         trace_history = []
         for i in range(N):
-            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i*dt)
+            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i * dt)
             eskf.predict(a, g, dt)
             if i % 100 == 0:
                 trace_history.append(np.trace(eskf.P))
@@ -113,17 +118,17 @@ class TestPureIMUDrift:
         assert np.linalg.norm(eskf.x[0:3]) < 1e8
 
 
-#  Aided Drift (baro + mag only) 
+#  Aided Drift (baro + mag only)
+
 
 class TestAidedDrift:
-
     def _run_aided(self, duration_s, dt=0.01):
         eskf, noise = make_eskf()
         rng = np.random.default_rng(77)
         imu = RealisticIMU(noise, rng)
         N = int(duration_s / dt)
         for i in range(N):
-            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i*dt)
+            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i * dt)
             eskf.predict(a, g, dt)
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
@@ -154,10 +159,10 @@ class TestAidedDrift:
         assert abs(eskf.x[2]) < 10.0
 
 
-#  Full Aiding (GPS + baro + mag) 
+#  Full Aiding (GPS + baro + mag)
+
 
 class TestFullyAidedDrift:
-
     def _run_full_aided(self, duration_s, dt=0.01, gps_rate_hz=5.0):
         eskf, noise = make_eskf()
         rng = np.random.default_rng(123)
@@ -166,13 +171,15 @@ class TestFullyAidedDrift:
         N = int(duration_s / dt)
         gps_interval = int(1.0 / gps_rate_hz / dt)
         for i in range(N):
-            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i*dt)
+            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), dt, i * dt)
             eskf.predict(a, g, dt)
             if i % gps_interval == 0:
                 eskf.update_gps(
                     true_lat + rng.normal(0, 2.5e-6),
                     true_lon + rng.normal(0, 2.5e-6),
-                    true_alt + rng.normal(0, 1.0), hdop=1.0)
+                    true_alt + rng.normal(0, 1.0),
+                    hdop=1.0,
+                )
             if i % 4 == 0:
                 eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
             if i % 10 == 0:
@@ -209,17 +216,17 @@ class TestFullyAidedDrift:
         assert np.linalg.norm(eskf.x[0:3]) < 20.0
 
 
-#  Temperature Drift 
+#  Temperature Drift
+
 
 class TestTemperatureDrift:
-
     def test_temp_drift_no_nan(self):
         """60s with temperature drift — numerically stable."""
         eskf, noise = make_eskf()
         rng = np.random.default_rng(55)
         imu = RealisticIMU(noise, rng, temp_drift=True)
         for i in range(6000):
-            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), 0.01, i*0.01)
+            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), 0.01, i * 0.01)
             eskf.predict(a, g, 0.01)
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
@@ -233,7 +240,7 @@ class TestTemperatureDrift:
         rng = np.random.default_rng(55)
         imu = RealisticIMU(noise, rng, temp_drift=False)
         for i in range(6000):
-            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), 0.01, i*0.01)
+            a, g = imu.sample(np.array([0, 0, -GRAVITY]), np.zeros(3), 0.01, i * 0.01)
             eskf.predict(a, g, 0.01)
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))

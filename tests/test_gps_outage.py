@@ -10,13 +10,12 @@ Default tests use 5s and 30s outages (complete in <10s each).
 
 import sys
 import os
-import math
 import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.eskf import ESKF, EKFHealth, ERROR_DIM
+from core.eskf import ESKF, EKFHealth
 from utils.noise import IMUNoiseParams
 
 GRAVITY = 9.80665
@@ -35,12 +34,18 @@ def warm_up(eskf, noise, rng, n_steps=1000, dt=0.01):
     true_lat, true_lon, true_alt = 13.0827, 80.2707, 50.0
     accel = np.array([0.0, 0.0, -GRAVITY])
     for i in range(n_steps):
-        eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                     rng.normal(0, noise.gyro_std, 3), dt)
+        eskf.predict(
+            accel + rng.normal(0, noise.accel_std, 3),
+            rng.normal(0, noise.gyro_std, 3),
+            dt,
+        )
         if i % 20 == 0:
-            eskf.update_gps(true_lat + rng.normal(0, 2e-6),
-                            true_lon + rng.normal(0, 2e-6),
-                            true_alt + rng.normal(0, 1.0), hdop=1.0)
+            eskf.update_gps(
+                true_lat + rng.normal(0, 2e-6),
+                true_lon + rng.normal(0, 2e-6),
+                true_alt + rng.normal(0, 1.0),
+                hdop=1.0,
+            )
         if i % 4 == 0:
             eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
         if i % 10 == 0:
@@ -60,8 +65,11 @@ def run_outage(outage_s, dt=0.01):
     # Outage: no GPS, keep baro+mag
     n_out = int(outage_s / dt)
     for i in range(n_out):
-        eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                     rng.normal(0, noise.gyro_std, 3), dt)
+        eskf.predict(
+            accel + rng.normal(0, noise.accel_std, 3),
+            rng.normal(0, noise.gyro_std, 3),
+            dt,
+        )
         if i % 4 == 0:
             eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
         if i % 10 == 0:
@@ -78,28 +86,34 @@ def run_outage(outage_s, dt=0.01):
 
     # Recovery: 5s with GPS
     for i in range(500):
-        eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                     rng.normal(0, noise.gyro_std, 3), dt)
-        
+        eskf.predict(
+            accel + rng.normal(0, noise.accel_std, 3),
+            rng.normal(0, noise.gyro_std, 3),
+            dt,
+        )
+
         if i % 20 == 0:
             # We want to catch the first innovation
             pre_update_innov = len(eskf.innovation_history)
-            
-            eskf.update_gps(true_lat + rng.normal(0, 2e-6),
-                            true_lon + rng.normal(0, 2e-6),
-                            true_alt + rng.normal(0, 1.0), hdop=1.0)
-            
+
+            eskf.update_gps(
+                true_lat + rng.normal(0, 2e-6),
+                true_lon + rng.normal(0, 2e-6),
+                true_alt + rng.normal(0, 1.0),
+                hdop=1.0,
+            )
+
             if len(eskf.innovation_history) > pre_update_innov:
                 _, source, y, S, nis = eskf.innovation_history[-1]
                 if source == "gps":
                     innovations.append(np.linalg.norm(y))
-                    
+
         if i % 4 == 0:
             eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
-            
+
         current_cov = np.trace(eskf.P[0:3, 0:3])
         cov_history.append(current_cov)
-        
+
         if recovery_time < 0 and current_cov < pos_cov_before * 2.0:
             recovery_time = i * dt
 
@@ -120,7 +134,6 @@ def run_outage(outage_s, dt=0.01):
 
 
 class TestGPSOutage5s:
-
     def test_error_bounded(self):
         r = run_outage(5.0)
         assert r["pos_error_outage"] < 5.0
@@ -135,7 +148,6 @@ class TestGPSOutage5s:
 
 
 class TestGPSOutage30s:
-
     def test_error_bounded(self):
         r = run_outage(30.0)
         assert r["pos_error_outage"] < 500.0
@@ -151,7 +163,6 @@ class TestGPSOutage30s:
 
 
 class TestGPSOutage60s:
-
     def test_no_nan(self):
         r = run_outage(60.0)
         assert not np.any(np.isnan(r["eskf"].x))
@@ -160,7 +171,6 @@ class TestGPSOutage60s:
     def test_covariance_grows(self):
         r = run_outage(60.0)
         assert r["pos_cov_outage"] > r["pos_cov_before"] * 5.0
-
 
     @pytest.mark.slow
     def test_metrics_logged(self):
@@ -171,8 +181,8 @@ class TestGPSOutage60s:
         assert len(r["innovations"]) > 0
         assert r["cov_history"][-1] < r["pos_cov_outage"]
 
-class TestGPSOutage120s:
 
+class TestGPSOutage120s:
     def test_no_nan(self):
         r = run_outage(120.0)
         assert not np.any(np.isnan(r["eskf"].x))
@@ -184,7 +194,6 @@ class TestGPSOutage120s:
 
 
 class TestRepeatedOutages:
-
     def test_3_cycles_stable(self):
         """3 cycles of 10s outage + 5s recovery."""
         eskf, noise = make_eskf()
@@ -197,18 +206,27 @@ class TestRepeatedOutages:
         for cycle in range(3):
             # 10s outage
             for i in range(1000):
-                eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                             rng.normal(0, noise.gyro_std, 3), 0.01)
+                eskf.predict(
+                    accel + rng.normal(0, noise.accel_std, 3),
+                    rng.normal(0, noise.gyro_std, 3),
+                    0.01,
+                )
                 if i % 4 == 0:
                     eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
             # 5s recovery
             for i in range(500):
-                eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                             rng.normal(0, noise.gyro_std, 3), 0.01)
+                eskf.predict(
+                    accel + rng.normal(0, noise.accel_std, 3),
+                    rng.normal(0, noise.gyro_std, 3),
+                    0.01,
+                )
                 if i % 20 == 0:
-                    eskf.update_gps(true_lat + rng.normal(0, 2e-6),
-                                    true_lon + rng.normal(0, 2e-6),
-                                    true_alt + rng.normal(0, 1.0), hdop=1.0)
+                    eskf.update_gps(
+                        true_lat + rng.normal(0, 2e-6),
+                        true_lon + rng.normal(0, 2e-6),
+                        true_alt + rng.normal(0, 1.0),
+                        hdop=1.0,
+                    )
                 if i % 4 == 0:
                     eskf.update_baro(-true_alt + rng.normal(0, noise.baro_std))
 

@@ -6,22 +6,21 @@ import json
 import sys
 import os
 import logging
-import time
 import numpy as np
 
 log = logging.getLogger("log_replay")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from core.eskf import ESKF, EKFHealth
-from utils.noise import IMUNoiseParams
-from logger.struct_log import StructuredLogger
+from core.eskf import ESKF  # noqa: E402
+from utils.noise import IMUNoiseParams  # noqa: E402
+from logger.struct_log import StructuredLogger  # noqa: E402
 
 
 class LogReplay:
     # the time machine — feed old flight data through a fresh filter
 
-    def __init__(self, noise_config: str = None):
+    def __init__(self, noise_config: str = None):  # type: ignore
         if noise_config:
             self.noise = IMUNoiseParams(noise_config)
         else:
@@ -34,7 +33,7 @@ class LogReplay:
         # crack open a log file and relive the magic (or the crash)
         os.makedirs(output_dir, exist_ok=True)
         basename = os.path.splitext(os.path.basename(input_path))[0]
-        output_path = os.path.join(output_dir, f"{basename}_replay.jsonl")
+        os.path.join(output_dir, f"{basename}_replay.jsonl")
 
         s_logger = StructuredLogger(output_dir)
 
@@ -78,7 +77,7 @@ class LogReplay:
                 continue
 
             # Use stored velocity as proxy accel measurement
-            vel = np.array(rec["state"]["vel"])
+            np.array(rec["state"]["vel"])
             # Gravity-compensated accel from velocity derivative
             accel = np.array([0.0, 0.0, -9.80665])
             gyro = np.zeros(3)
@@ -103,7 +102,7 @@ class LogReplay:
                 covariance=self.eskf.P,
                 health_status=self.eskf.health.name,
                 safety_action="NONE",
-                timing_ms=dt * 1000.0
+                timing_ms=dt * 1000.0,
             )
 
             self._record_count += 1
@@ -120,8 +119,9 @@ class LogReplay:
         try:
             from pymavlink import mavutil
         except ImportError:
-            log.error("pymavlink required for MAVLink replay. "
-                      "Install: pip install pymavlink")
+            log.error(
+                "pymavlink required for MAVLink replay. Install: pip install pymavlink"
+            )
             return None
 
         os.makedirs(output_dir, exist_ok=True)
@@ -143,16 +143,16 @@ class LogReplay:
 
             if mtype == "RAW_IMU":
                 # pixhawk sends everything in milli-whatevers
-                accel = np.array([
-                    msg.xacc / 1000.0 * 9.80665,
-                    msg.yacc / 1000.0 * 9.80665,
-                    msg.zacc / 1000.0 * 9.80665
-                ])
-                gyro = np.array([
-                    msg.xgyro / 1000.0,
-                    msg.ygyro / 1000.0,
-                    msg.zgyro / 1000.0
-                ])
+                accel = np.array(
+                    [
+                        msg.xacc / 1000.0 * 9.80665,
+                        msg.yacc / 1000.0 * 9.80665,
+                        msg.zacc / 1000.0 * 9.80665,
+                    ]
+                )
+                gyro = np.array(
+                    [msg.xgyro / 1000.0, msg.ygyro / 1000.0, msg.zgyro / 1000.0]
+                )
 
                 time_us = msg.time_usec
 
@@ -163,8 +163,7 @@ class LogReplay:
 
                     if len(init_accel_buf) >= 50 and len(init_mag_buf) >= 50:
                         self.eskf.initialize_from_sensors(
-                            np.array(init_accel_buf),
-                            np.array(init_mag_buf)
+                            np.array(init_accel_buf), np.array(init_mag_buf)
                         )
                         log.info("ESKF initialized from MAVLink log")
                     continue
@@ -191,7 +190,7 @@ class LogReplay:
                 covariance=self.eskf.P,
                 health_status=self.eskf.health.name,
                 safety_action="NONE",
-                timing_ms=0.0
+                timing_ms=0.0,
             )
 
         s_logger.close()
@@ -202,8 +201,9 @@ class LogReplay:
 # ── CLI Entry Point ────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO,
-                        format="%(levelname)s  %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s  %(name)s: %(message)s"
+    )
 
     if len(sys.argv) < 2:
         print("Usage: python log_replay.py <logfile> [--format jsonl|mavlink]")

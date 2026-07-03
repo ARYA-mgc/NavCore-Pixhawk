@@ -1,0 +1,97 @@
+\doxysection{navcore::\+ESKFCore Class Reference}
+\hypertarget{classnavcore_1_1_e_s_k_f_core}{}\label{classnavcore_1_1_e_s_k_f_core}\index{navcore::ESKFCore@{navcore::ESKFCore}}
+\doxysubsubsection*{Public Member Functions}
+\begin{DoxyCompactItemize}
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a50a8cd824f1a2672ab8de4c44e98efb9}\label{classnavcore_1_1_e_s_k_f_core_a50a8cd824f1a2672ab8de4c44e98efb9} 
+{\bfseries ESKFCore} (const \doxymbox{\hyperlink{structnavcore_1_1_i_m_u_noise_params}{IMUNoise\+Params}} \&noise)
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a67105f70f7dacf1e514f72f5dacedd5d}\label{classnavcore_1_1_e_s_k_f_core_a67105f70f7dacf1e514f72f5dacedd5d} 
+{\bfseries ESKFCore} (const ESKFCore \&)=delete
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a49a3125fd1243a72811b641e3f24a465}\label{classnavcore_1_1_e_s_k_f_core_a49a3125fd1243a72811b641e3f24a465} 
+ESKFCore \& {\bfseries operator=} (const ESKFCore \&)=delete
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ae16b87c9eda5117ed4042c290f78037a}\label{classnavcore_1_1_e_s_k_f_core_ae16b87c9eda5117ed4042c290f78037a} 
+{\bfseries ESKFCore} (ESKFCore \&\&)=default
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ad85aa26179384ccb2dd3a1a82aa69ca0}\label{classnavcore_1_1_e_s_k_f_core_ad85aa26179384ccb2dd3a1a82aa69ca0} 
+ESKFCore \& {\bfseries operator=} (ESKFCore \&\&)=default
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_aaa6dca8303a10dd6da874f2438a2d5f6}\label{classnavcore_1_1_e_s_k_f_core_aaa6dca8303a10dd6da874f2438a2d5f6} 
+void {\bfseries predict} (const Vec3 \&accel, const Vec3 \&gyro, double dt)
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a55727dc857188bea1dbc06b1af7ac77d}\label{classnavcore_1_1_e_s_k_f_core_a55727dc857188bea1dbc06b1af7ac77d} 
+void {\bfseries update\+\_\+baro} (double alt\+\_\+m)
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a787b3624701726417b8df72b18dc4058}\label{classnavcore_1_1_e_s_k_f_core_a787b3624701726417b8df72b18dc4058} 
+void {\bfseries update\+\_\+mag} (double yaw\+\_\+measured, double mag\+\_\+norm=-\/1.\+0, double t\+\_\+now=0.\+0)
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a0a9a0a5fce0b29ab222d0564284d647e}\label{classnavcore_1_1_e_s_k_f_core_a0a9a0a5fce0b29ab222d0564284d647e} 
+void {\bfseries update\+\_\+optical\+\_\+flow} (double flow\+\_\+vx, double flow\+\_\+vy, double distance, int quality)
+\item 
+bool \doxymbox{\hyperlink{classnavcore_1_1_e_s_k_f_core_a3721fc13e9a2417c386f1fc944722654}{update\+\_\+external}} (const Vec\+Xd \&z, const Vec\+Xd \&z\+\_\+pred, const Mat\+Xd \&H, const Mat\+Xd \&R, const std::\+string \&source="{}external"{})
+\begin{DoxyCompactList}\small\item\em Generic external measurement update (VIO, UWB, SLAM, etc.). \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_aaf3c70ccbb89d16f8e3b014613cf16e0}\label{classnavcore_1_1_e_s_k_f_core_aaf3c70ccbb89d16f8e3b014613cf16e0} 
+void {\bfseries update\+\_\+gps} (double lat, double lon, double alt, double hdop=1.\+0)
+\begin{DoxyCompactList}\small\item\em GPS position update with WGS-\/84 → NED conversion. \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ae928d281027440b6876900f0d3f1f6c9}\label{classnavcore_1_1_e_s_k_f_core_ae928d281027440b6876900f0d3f1f6c9} 
+void {\bfseries update\+\_\+zupt} ()
+\begin{DoxyCompactList}\small\item\em Zero velocity update — forces v=\+[0,0,0]\+. \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a2f1d2f26c08dd7b75c16658f628e853d}\label{classnavcore_1_1_e_s_k_f_core_a2f1d2f26c08dd7b75c16658f628e853d} 
+void {\bfseries update\+\_\+radar\+\_\+velocity} (double vx, double vy, double vz, double weight=1.\+0)
+\begin{DoxyCompactList}\small\item\em Radar Doppler velocity update. \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a56128d21c9d5c7bb30a8cf06eeead800}\label{classnavcore_1_1_e_s_k_f_core_a56128d21c9d5c7bb30a8cf06eeead800} 
+void {\bfseries update\+\_\+lidar\+\_\+range} (double distance, double weight=1.\+0)
+\begin{DoxyCompactList}\small\item\em Lidar range-\/to-\/ground altitude update. \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a070d8f3e073b6914067414f8fc95b0fd}\label{classnavcore_1_1_e_s_k_f_core_a070d8f3e073b6914067414f8fc95b0fd} 
+void {\bfseries scale\+\_\+process\+\_\+noise} (double vibration\+\_\+level)
+\begin{DoxyCompactList}\small\item\em Scale process noise based on vibration level. \end{DoxyCompactList}\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_aa057af6eb5478a1d1cd0b154d6e6d7c6}\label{classnavcore_1_1_e_s_k_f_core_aa057af6eb5478a1d1cd0b154d6e6d7c6} 
+bool {\bfseries initialize\+\_\+from\+\_\+sensors} (const Eigen::\+\+Matrix\+Xd \&accel\+\_\+samples, const Eigen::\+\+Matrix\+Xd \&mag\+\_\+samples)
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_aaeda9d013f55f8f5a27800ae5cd9ead9}\label{classnavcore_1_1_e_s_k_f_core_aaeda9d013f55f8f5a27800ae5cd9ead9} 
+void {\bfseries reset} ()
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_aec37ea8388c8cc77993f5d8b093e011d}\label{classnavcore_1_1_e_s_k_f_core_aec37ea8388c8cc77993f5d8b093e011d} 
+\doxymbox{\hyperlink{structnavcore_1_1_e_s_k_f_state}{ESKFState}} {\bfseries get\+\_\+state} () const
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a97924e9f8e95600353aec0cda2cff224}\label{classnavcore_1_1_e_s_k_f_core_a97924e9f8e95600353aec0cda2cff224} 
+EKFHealth {\bfseries get\+\_\+health} () const
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ab04459611834ec8b734ac5f57d4894e9}\label{classnavcore_1_1_e_s_k_f_core_ab04459611834ec8b734ac5f57d4894e9} 
+const MatP \& {\bfseries get\+\_\+covariance} () const
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ad04c342f5b46d5d4567d082180e98ff3}\label{classnavcore_1_1_e_s_k_f_core_ad04c342f5b46d5d4567d082180e98ff3} 
+bool {\bfseries is\+\_\+initialized} () const
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_abb37d19a4c5d8d46591cffc33398acf9}\label{classnavcore_1_1_e_s_k_f_core_abb37d19a4c5d8d46591cffc33398acf9} 
+double {\bfseries get\+\_\+baro\+\_\+bias} () const
+\item 
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_ad01ebdac4af4b9a057200a80ecfbe057}\label{classnavcore_1_1_e_s_k_f_core_ad01ebdac4af4b9a057200a80ecfbe057} 
+double {\bfseries get\+\_\+vibration\+\_\+scale} () const
+\end{DoxyCompactItemize}
+
+
+\label{doc-func-members}
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_doc-func-members}
+\doxysubsection{Member Function Documentation}
+\Hypertarget{classnavcore_1_1_e_s_k_f_core_a3721fc13e9a2417c386f1fc944722654}\index{navcore::ESKFCore@{navcore::ESKFCore}!update\_external@{update\_external}}
+\index{update\_external@{update\_external}!navcore::ESKFCore@{navcore::ESKFCore}}
+\doxysubsubsection{\texorpdfstring{update\_external()}{update\_external()}}
+{\footnotesize\ttfamily \label{classnavcore_1_1_e_s_k_f_core_a3721fc13e9a2417c386f1fc944722654} 
+bool navcore::\+\+ESKFCore::\+update\+\_\+external (\begin{DoxyParamCaption}\item[{const Vec\+Xd \&}]{z}{, }\item[{const Vec\+Xd \&}]{z\+\_\+pred}{, }\item[{const Mat\+Xd \&}]{H}{, }\item[{const Mat\+Xd \&}]{R}{, }\item[{const std::\+string \&}]{source}{ = {\ttfamily "{}external"{}}}\end{DoxyParamCaption})}
+
+
+
+Generic external measurement update (VIO, UWB, SLAM, etc.). 
+
+\begin{DoxyReturn}{Returns}
+true if measurement was accepted 
+\end{DoxyReturn}
+
+
+The documentation for this class was generated from the following files:\+\begin{DoxyCompactItemize}
+\item 
+cpp\+\_\+port/\+include/\+\doxymbox{\hyperlink{eskf__core_8hpp}{eskf\+\_\+core.\+hpp}}\item 
+cpp\+\_\+port/\+src/\+\doxymbox{\hyperlink{eskf__core_8cpp}{eskf\+\_\+core.\+cpp}}\end{DoxyCompactItemize}

@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.eskf import ESKF, EKFHealth, ERROR_DIM
+from core.eskf import ESKF, EKFHealth
 from utils.noise import IMUNoiseParams
 
 GRAVITY = 9.80665
@@ -34,14 +34,15 @@ def make_eskf():
     return eskf, noise
 
 
-#  Test: Compass Disturbance 
+#  Test: Compass Disturbance
+
 
 class TestCompassDisturbance:
     """Simulate magnetic interference from motors and nearby metal."""
 
     def test_motor_current_interference(self):
         """Simulates motor current creating a magnetic field.
-        
+
         During high throttle, mag readings get corrupted.
         Filter should detect and reject bad mag data.
         """
@@ -52,20 +53,28 @@ class TestCompassDisturbance:
 
         # 10s normal operation
         for i in range(1000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
-                eskf.update_mag(rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i*0.01)
+                eskf.update_mag(
+                    rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i * 0.01
+                )
 
         yaw_before = eskf._quat_to_euler(eskf.x[6:10])[2]
 
         # 5s of motor current interference: mag field magnitude doubles
         for i in range(500):
             t = 10.0 + i * 0.01
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
@@ -79,12 +88,13 @@ class TestCompassDisturbance:
         yaw_change = abs(yaw_after - yaw_before)
         if yaw_change > math.pi:
             yaw_change = 2 * math.pi - yaw_change
-        assert yaw_change < math.radians(20.0), \
+        assert yaw_change < math.radians(20.0), (
             f"Motor interference corrupted yaw by {math.degrees(yaw_change):.1f}°"
+        )
 
     def test_nearby_metal_gradual_distortion(self):
         """Gradual magnetic distortion (e.g., flying near a building).
-        
+
         Mag norm changes slowly — filter should adapt R (inflate noise).
         """
         eskf, noise = make_eskf()
@@ -94,25 +104,34 @@ class TestCompassDisturbance:
 
         # Warm up
         for i in range(2000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
-                eskf.update_mag(rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i*0.01)
+                eskf.update_mag(
+                    rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i * 0.01
+                )
 
         # Gradually increase mag norm (approaching metal)
         for i in range(3000):
             t = 20.0 + i * 0.01
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
                 # Slowly increasing mag norm
                 mag_norm = 0.5 + 0.3 * (i / 3000.0)  # 0.5 → 0.8
-                eskf.update_mag(rng.normal(0, noise.mag_std),
-                                mag_norm=mag_norm, t_now=t)
+                eskf.update_mag(
+                    rng.normal(0, noise.mag_std), mag_norm=mag_norm, t_now=t
+                )
 
         assert not np.any(np.isnan(eskf.x))
         assert eskf.health != EKFHealth.FAULT
@@ -126,39 +145,51 @@ class TestCompassDisturbance:
 
         # Normal
         for i in range(2000):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 2 == 0:
-                eskf.update_mag(rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i*0.01)
+                eskf.update_mag(
+                    rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=i * 0.01
+                )
 
         # Disturbance (2s)
         for i in range(200):
             t = 20.0 + i * 0.01
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             eskf.update_mag(1.5, mag_norm=1.2, t_now=t)  # reject this
 
-        yaw_cov_during = eskf.P[8, 8]
+        eskf.P[8, 8]
 
         # Recovery (10s)
         for i in range(1000):
             t = 22.0 + i * 0.01
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 2 == 0:
                 eskf.update_mag(rng.normal(0, noise.mag_std), mag_norm=0.5, t_now=t)
 
         assert not np.any(np.isnan(eskf.x))
 
 
-#  Test: Vibration Effects 
+#  Test: Vibration Effects
+
 
 class TestVibrationEffects:
     """Simulate high-frequency IMU noise from propeller imbalance."""
 
     def test_high_freq_vibration(self):
         """Inject 100Hz vibration (typical propeller frequency).
-        
+
         Filter should handle high-frequency noise without diverging.
         """
         eskf, noise = make_eskf()
@@ -172,11 +203,13 @@ class TestVibrationEffects:
             # Propeller vibration: ~100Hz sinusoidal on all axes
             vib_freq = 100.0 * 2 * math.pi
             vib_amp = 2.0  # 2 m/s² vibration (severe)
-            vibration = vib_amp * np.array([
-                math.sin(vib_freq * t),
-                math.sin(vib_freq * t + 1.0),
-                math.sin(vib_freq * t + 2.0),
-            ])
+            vibration = vib_amp * np.array(
+                [
+                    math.sin(vib_freq * t),
+                    math.sin(vib_freq * t + 1.0),
+                    math.sin(vib_freq * t + 2.0),
+                ]
+            )
 
             accel = base_accel + vibration + rng.normal(0, noise.accel_std, 3)
             g = gyro + rng.normal(0, noise.gyro_std, 3)
@@ -196,11 +229,12 @@ class TestVibrationEffects:
     def test_vibration_scale_exists(self):
         """Vibration scale attribute should exist and be >= 1.0."""
         eskf, _ = make_eskf()
-        assert hasattr(eskf, '_vibration_scale')
+        assert hasattr(eskf, "_vibration_scale")
         assert eskf._vibration_scale >= 1.0
 
 
-#  Test: Aggressive Maneuvers 
+#  Test: Aggressive Maneuvers
+
 
 class TestAggressiveManeuvers:
     """Simulate aggressive drone flight: fast yaw, banked turns, climbs."""
@@ -214,7 +248,9 @@ class TestAggressiveManeuvers:
         for i in range(500):
             eskf.predict(
                 np.array([0, 0, -GRAVITY]) + rng.normal(0, noise.accel_std, 3),
-                rng.normal(0, noise.gyro_std, 3), dt)
+                rng.normal(0, noise.gyro_std, 3),
+                dt,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
@@ -225,7 +261,7 @@ class TestAggressiveManeuvers:
             eskf.predict(
                 accel_profile[i] + rng.normal(0, noise.accel_std, 3),
                 gyro_profile[i] + rng.normal(0, noise.gyro_std, 3),
-                dt
+                dt,
             )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
@@ -277,7 +313,7 @@ class TestAggressiveManeuvers:
         eskf = self._run_maneuver(accel, gyro, dt)
         assert not np.any(np.isnan(eskf.x))
         euler = eskf._quat_to_euler(eskf.x[6:10])
-        tilt = math.sqrt(euler[0]**2 + euler[1]**2)
+        tilt = math.sqrt(euler[0] ** 2 + euler[1] ** 2)
         assert tilt < math.radians(70), "Excessive tilt after banked turn"
 
     def test_rapid_climb_5ms(self):
@@ -321,9 +357,9 @@ class TestAggressiveManeuvers:
             t = i * dt
             # Climb + bank
             accel[i] = [
-                GRAVITY * 0.3 * math.sin(2.0 * t),   # lateral oscillation
-                GRAVITY * 0.1 * math.cos(3.0 * t),    # forward/back
-                -GRAVITY - 2.0 * math.sin(1.0 * t),   # climb/descend
+                GRAVITY * 0.3 * math.sin(2.0 * t),  # lateral oscillation
+                GRAVITY * 0.1 * math.cos(3.0 * t),  # forward/back
+                -GRAVITY - 2.0 * math.sin(1.0 * t),  # climb/descend
             ]
             gyro[i] = [
                 math.radians(30) * math.sin(2.0 * t),  # roll
@@ -336,7 +372,8 @@ class TestAggressiveManeuvers:
         assert eskf.health != EKFHealth.FAULT
 
 
-#  Test: Yaw Drift During Hover 
+#  Test: Yaw Drift During Hover
+
 
 class TestYawDriftHover:
     """Hover for extended periods — yaw should not drift significantly."""
@@ -348,8 +385,11 @@ class TestYawDriftHover:
         gyro = np.zeros(3)
         N = int(duration_s / 0.01)
         for i in range(N):
-            eskf.predict(accel + rng.normal(0, noise.accel_std, 3),
-                         gyro + rng.normal(0, noise.gyro_std, 3), 0.01)
+            eskf.predict(
+                accel + rng.normal(0, noise.accel_std, 3),
+                gyro + rng.normal(0, noise.gyro_std, 3),
+                0.01,
+            )
             if i % 10 == 0:
                 eskf.update_baro(rng.normal(0, noise.baro_std))
             if i % 2 == 0:
@@ -360,8 +400,9 @@ class TestYawDriftHover:
         """30s hover with mag — yaw drift should be <5°."""
         eskf = self._run_hover(30.0)
         yaw = eskf._quat_to_euler(eskf.x[6:10])[2]
-        assert abs(yaw) < math.radians(15.0), \
+        assert abs(yaw) < math.radians(15.0), (
             f"Yaw drifted {math.degrees(yaw):.1f}° during 30s hover"
+        )
 
     @pytest.mark.slow
     def test_hover_300s_yaw_stable(self):

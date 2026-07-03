@@ -19,7 +19,7 @@ class NumpyEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, (np.int32, np.int64)):
             return int(obj)
-        if hasattr(obj, 'name'):  # For Enums
+        if hasattr(obj, "name"):  # For Enums
             return obj.name
         return super(NumpyEncoder, self).default(obj)
 
@@ -29,20 +29,27 @@ class StructuredLogger:
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.filepath = os.path.join(log_dir, f"ins_structured_{timestamp}.jsonl")
-        
+
         try:
             self._file = open(self.filepath, "w")
             log.info(f"Structured logging started: {self.filepath}")
         except Exception as e:
             log.error(f"Failed to open structured log: {e}")
-            self._file = None
+            self._file = None  # type: ignore
 
-    def log_state(self, t: float, state: dict, covariance: np.ndarray, 
-                  health_status: str, safety_action: str, timing_ms: float):
+    def log_state(
+        self,
+        t: float,
+        state: dict,
+        covariance: np.ndarray,
+        health_status: str,
+        safety_action: str,
+        timing_ms: float,
+    ):
         # Log complete ESKF state.
         if self._file is None:
             return
-            
+
         record = {
             "schema_version": "v1.0.0",
             "t": t,
@@ -56,22 +63,31 @@ class StructuredLogger:
                 "euler": state["euler"],
                 "quat": state["quat"],
                 "bias_a": state["accel_bias"],
-                "bias_g": state["gyro_bias"]
+                "bias_g": state["gyro_bias"],
             },
             "cov": {
                 "trace": float(np.trace(covariance)),
                 "diag": np.diag(covariance),
-                "cond": float(np.linalg.cond(covariance)) if covariance.size > 0 else 0.0
-            }
+                "cond": float(np.linalg.cond(covariance))
+                if covariance.size > 0
+                else 0.0,
+            },
         }
         self._write_record(record)
 
-    def log_innovation(self, t: float, sensor: str, nis: float, 
-                       y: np.ndarray, S: np.ndarray, rejected: bool):
+    def log_innovation(
+        self,
+        t: float,
+        sensor: str,
+        nis: float,
+        y: np.ndarray,
+        S: np.ndarray,
+        rejected: bool,
+    ):
         # Log filter innovation statistics.
         if self._file is None:
             return
-            
+
         record = {
             "schema_version": "v1.0.0",
             "t": t,
@@ -80,7 +96,7 @@ class StructuredLogger:
             "nis": float(nis),
             "rejected": rejected,
             "y": y,
-            "S_diag": np.diag(S)
+            "S_diag": np.diag(S),
         }
         self._write_record(record)
 
