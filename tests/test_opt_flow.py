@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from fusion.opt_flow import TerrainKalmanFilter, MedianFilter, OpticalFlowINS
 
@@ -58,7 +57,6 @@ def test_optical_flow_ins_process():
     ins.r_mount = np.array([1.0, 0.0, 0.0])
     
     dt_us = 100000  # 0.1s
-    dt_s = 0.1
     
     # Test case: purely translating forward at 2 m/s
     # altitude = 10m
