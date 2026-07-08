@@ -135,11 +135,11 @@ class OpticalFlowINS:
         flow_rate_y = flow_y / dt_s
 
         # 3. Sliding Median Filter for outlier rejection
-        med_rate_x, med_rate_y = self.median_filter.update(flow_rate_x, flow_rate_y)
+        filtered_rate_x, filtered_rate_y = self.median_filter.update(flow_rate_x, flow_rate_y)
 
         # 4. Body velocity mapping (correct axis mapping)
-        v_cam_x = med_rate_y * distance * self.scale_x
-        v_cam_y = -med_rate_x * distance * self.scale_y
+        v_cam_x = filtered_rate_y * distance * self.scale_x
+        v_cam_y = -filtered_rate_x * distance * self.scale_y
         
         # 5. Lever Arm (Camera Offset) Compensation
         # v_cam = v_cg + omega x r_mount
