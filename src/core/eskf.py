@@ -90,8 +90,8 @@ class ESKF:
         self._calibrated_mag_norm = 0.5
         self._mag_consecutive_good = 0
         self._mag_required_good = 3
-        self._gps_origin = None
-        self._baro_origin = None
+        self._gps_origin: typing.Optional[dict] = None
+        self._baro_origin: typing.Optional[float] = None
         self._innovation_stats = {"baro": [], "mag": []}  # type: ignore
         self._sensor_rejections = {}  # type: ignore
 
