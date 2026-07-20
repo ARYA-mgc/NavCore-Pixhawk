@@ -120,7 +120,7 @@ class OpticalFlowINS:
         # 1. Terrain Kalman Filter prediction and update
         self.terrain_kf.predict(vz, dt_s)
         self.terrain_kf.update(flow_msg.distance)
-        distance = flow_msg.distance  # BYPASS TERRAIN KF to avoid vz feedback loop
+        distance = self.terrain_kf.get_distance()
 
         # 2. Extract flow rates
         if use_raw_flow:

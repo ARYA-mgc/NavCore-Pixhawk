@@ -473,6 +473,7 @@ class ESKF:
             return
         q = self.x[QUAT]
         euler = self._quat_to_euler(q)
+        phi, theta = euler[0], euler[1]
         yaw_pred = euler[2]
         z = np.array([yaw_measured])
         z_pred = np.array([yaw_pred])
@@ -481,7 +482,13 @@ class ESKF:
             ratio = abs(mag_norm / self._calibrated_mag_norm - 1.0)
             if ratio > 0.15:
                 R_val *= 10.0
-        if self.update_external(z, z_pred, self.H_mag, R_val, source="mag"):
+        H_mag_dyn = np.zeros((1, ERROR_DIM))
+        if abs(math.cos(theta)) > 1e-4:
+            H_mag_dyn[0, 7] = math.sin(phi) / math.cos(theta)
+            H_mag_dyn[0, 8] = math.cos(phi) / math.cos(theta)
+        else:
+            H_mag_dyn[0, 8] = 1.0
+        if self.update_external(z, z_pred, H_mag_dyn, R_val, source="mag"):
             if mag_norm > 0:
                 alpha_mag = 0.002
                 self._calibrated_mag_norm = (
@@ -504,7 +511,7 @@ class ESKF:
         H_flow[:, 3:6] = R_dcm.T[0:2, :]
         v_ned = self.x[VEL]
         v_body = R_dcm.T @ v_ned
-        H_flow[:, E_ATT] = self._skew(v_body)[0:2, :]
+        H_flow[:, E_ATT] = -self._skew(v_body)[0:2, :]
         R_base = 0.5**2
         R_flow = np.eye(2) * (R_base * 100.0 / max(quality, 1))
         z = np.array([flow_vx, flow_vy])
@@ -529,14 +536,16 @@ class ESKF:
         The filter predicts this by rotating the global NED velocity by R_dcm^T.
         """
         R_dcm = self._quat_to_dcm(self.x[QUAT])
+        v_body = R_dcm.T @ self.x[VEL]
 
         H_radar = np.zeros((3, ERROR_DIM))
         H_radar[:, 3:6] = R_dcm.T  # Map NED velocity error to body frame measurement
+        H_radar[:, E_ATT] = -self._skew(v_body)
 
         R_radar = np.eye(3) * (0.1**2) / weight
 
         z = np.array([vx, vy, vz])
-        z_pred = R_dcm.T @ self.x[VEL]
+        z_pred = v_body
 
         self.update_external(z, z_pred, H_radar, R_radar, source="radar")
 
@@ -562,6 +571,9 @@ class ESKF:
         H_lidar = np.zeros((1, ERROR_DIM))
         # z = -pos_z / cos_tilt -> dz/dpos_z = -1.0 / cos_tilt
         H_lidar[0, 2] = -1.0 / cos_tilt
+        pos_z = self.x[2]
+        H_lidar[0, 6] = -(pos_z / (cos_tilt**2)) * R_dcm[2, 1]
+        H_lidar[0, 7] = (pos_z / (cos_tilt**2)) * R_dcm[2, 0]
 
         R_lidar = np.array([[0.05**2]]) / weight
 
@@ -975,7 +987,6 @@ class ESKF:
         force_accept: bool = False,
     ) -> bool:
         """GPS position update with WGS-84 → local NED conversion.
-
         Also helps observe wind velocity through GPS-vs-INS discrepancy.
         """
         if not self._initialized:
