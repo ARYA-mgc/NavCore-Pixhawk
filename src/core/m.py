@@ -653,41 +653,44 @@ class INSNavSys:
         elif mtype == "OPTICAL_FLOW_RAD":
             self.fault_mgr.report_sensor_update("flow", t_now)
             if self.mht._initialized:
-                # Step 1: need a rangefinder reading or this is all meaningless
+                # Step 1: Check basic validity
                 if not hasattr(msg, "distance") or msg.distance <= 0.05:
                     return
 
                 # Step 2: spinning too fast? Flow sensor goes blurry. Reject it.
-                gyro_x_rate = abs(
-                    msg.integrated_xgyro / (msg.integration_time_us / 1e6)
-                )
-                gyro_y_rate = abs(
-                    msg.integrated_ygyro / (msg.integration_time_us / 1e6)
-                )
+                dt_flow = msg.integration_time_us / 1e6
+                if dt_flow <= 0:
+                    return
+                gyro_x_rate = abs(msg.integrated_xgyro / dt_flow)
+                gyro_y_rate = abs(msg.integrated_ygyro / dt_flow)
                 if gyro_x_rate > 1.5 or gyro_y_rate > 1.5:  # ~85 deg/s
                     return
 
-                # Raw flow or pre-compensated? Depends on who we trust more: us or ArduPilot.
                 use_raw_flow = self.params.get("OPTFLOW_RAW", True)
-
-                if use_raw_flow:
-                    # Raw flow — we'll do our own gyro compensation, thanks
-                    flow_vx = msg.integrated_x
-                    flow_vy = msg.integrated_y
-                else:
-                    # ArduPilot already subtracted gyro — trust the FC on this one
-                    flow_vx = msg.integrated_x - msg.integrated_xgyro
-                    flow_vy = msg.integrated_y - msg.integrated_ygyro
-
-                dt_flow = msg.integration_time_us / 1e6
-
-                if dt_flow > 0:
-                    # Step 3: angular_rate × height = ground velocity. High school physics saves the day.
-                    vx = (flow_vx / dt_flow) * msg.distance
-                    vy = (flow_vy / dt_flow) * msg.distance
+                
+                # Step 3: Advanced pipeline - use OpticalFlowINS as a robust pre-processor
+                state = self.mht.primary.state
+                vz = state["vel"][2]
+                omega = getattr(self.mht.primary, "_last_gyro", np.zeros(3))
+                
+                vx_body, vy_body = self.optical_flow.process_flow_for_eskf(
+                    msg, 
+                    use_raw_flow=use_raw_flow, 
+                    vz=vz, 
+                    omega=omega
+                )
+                
+                if vx_body is not None and vy_body is not None:
+                    # Send robustly compensated body velocities directly to MHT
+                    # Because they are already compensated for rotation by process_flow_for_eskf,
+                    # we tell the ESKF *not* to do its own basic gyro compensation.
                     self.mht.update_optical_flow(
-                        vx, vy, msg.distance, msg.quality, enable_rot_comp=use_raw_flow
+                        vx_body, vy_body, msg.distance, msg.quality, enable_rot_comp=False
                     )
+
+                # Also update the dead-reckoning flow estimator (for logging/fallback)
+                euler = state["euler"]
+                self.optical_flow.update(msg, current_yaw_rad=euler[2], vz=vz, omega=omega)
 
         elif mtype == "VISION_POSITION_ESTIMATE":
             # VIO: the camera thinks it knows where we are (T265 / ORB-SLAM3)

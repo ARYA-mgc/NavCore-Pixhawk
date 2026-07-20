@@ -26,6 +26,7 @@ We pushed the codebase beyond a simple Kalman Filter by adding advanced percepti
 - **GPS Fusion with Smooth Handoff:** WGS-84 → local NED conversion with HDOP-scaled noise. Auto-origin on first fix. Smooth GPS→INS handoff when GPS comes back online after outage.
 - **Tight GPS/INS Coupling:** Optional pseudorange-level fusion via direct u-blox F9P UART serial (`UBX RXM-RAWX`). Per-satellite CN0-weighted noise and multipath rejection. Includes simulated pseudorange generator for testing with the hardware.
 - **Visual-Inertial Odometry (VIO):** `VIOPipeline` is fully integrated — camera-based position correction for massive accuracy improvement in GPS-denied environments.
+- **Advanced Optical Flow Pipeline:** A zero-lag 1D Terrain Kalman Filter handles slopes and trees dynamically, while a sliding median filter rejects specular reflections. Lever arm offsets and synced gyros perfectly compensate for translational velocities induced by drone rotation before ESKF fusion.
 - **Zero Velocity Update (ZUPT):** When the drone is stationary on the ground, velocity is forced to zero as a measurement update. Dramatically reduces drift during idle periods.
 - **Adaptive Process Noise:** Q matrix scales with detected vibration level (1× calm → 10× severe). Driven by multi-IMU variance and ML anomaly detection.
 - **Barometric Drift Compensation:** Slow EMA bias estimator tracks baro drift from temperature and weather changes. Clamped to ±10m, activates after initial convergence.

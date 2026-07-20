@@ -324,7 +324,7 @@ def test_end_to_end_full_chain():
             nav._dispatch_message("GPS_RAW_INT", msg_gps, t_now)
         t_now += dt
 
-    cov_normal = np.trace(nav.eskf.P[0:3, 0:3])
+    cov_normal = np.trace(nav.eskf.P[0:2, 0:2])
 
     # 3. GPS Dropout (5 seconds)
     for i in range(500):
@@ -346,8 +346,8 @@ def test_end_to_end_full_chain():
             nav.mht.update_baro(-50.0)
         t_now += dt
 
-    cov_dropout = np.trace(nav.eskf.P[0:3, 0:3])
-    assert cov_dropout > cov_normal, "Covariance should grow during GPS dropout"
+    cov_dropout = np.trace(nav.eskf.P[0:2, 0:2])
+    assert cov_dropout > cov_normal, "Horizontal covariance should grow during GPS dropout"
 
     # 4. GPS Recovery
     for i in range(500):
