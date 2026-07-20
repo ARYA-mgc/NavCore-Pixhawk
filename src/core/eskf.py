@@ -91,6 +91,7 @@ class ESKF:
         self._mag_consecutive_good = 0
         self._mag_required_good = 3
         self._gps_origin = None
+        self._baro_origin = None
         self._innovation_stats = {"baro": [], "mag": []}  # type: ignore
         self._sensor_rejections = {}  # type: ignore
 
@@ -151,7 +152,9 @@ class ESKF:
         sab = 2.0 * noise.accel_bias_std**2 / max(noise.accel_bias_tau, 1.0)
         sgb = 2.0 * noise.gyro_bias_std**2 / max(noise.gyro_bias_tau, 1.0)
         np.fill_diagonal(self.Q_base[E_VEL, E_VEL], sa)
-        np.fill_diagonal(self.Q_base[E_ATT, E_ATT], sg)
+        # Attitude process noise: gyro white noise + additional random walk
+        # to capture unmodeled gyro bias instability (important for yaw observability)
+        np.fill_diagonal(self.Q_base[E_ATT, E_ATT], sg * 2.0)
         np.fill_diagonal(self.Q_base[E_ABIAS, E_ABIAS], sab)
         np.fill_diagonal(self.Q_base[E_GBIAS, E_GBIAS], sgb)
         # Baro bias: moderate tracking of sim baro drift
@@ -428,16 +431,26 @@ class ESKF:
     def update_baro(self, alt_measured: float):
         if not self._initialized:
             return
+        if self._baro_origin is None:
+            self._baro_origin = alt_measured
+            
+        rel_alt = alt_measured - self._baro_origin
         z_pred = np.array([-self.x[2] + self.x[BARO_BIAS_IDX]])
-        z = np.array([alt_measured])
+        z = np.array([rel_alt])
         H = np.zeros((1, ERROR_DIM))
         H[0, 2] = -1.0
         H[0, E_BARO_BIAS] = 1.0
         R = self.R_baro.copy()
-        if abs(z[0] - z_pred[0]) > 5.0:
-            R *= 3.0
-        # Baro is the primary altitude source — force-accept to prevent
-        # Z-axis drift from GPS-only covariance tightening.
+        innov = abs(z[0] - z_pred[0])
+        if innov > 50.0:
+            # Extreme spike — reject entirely (e.g., sensor failure)
+            self._sensor_rejections["baro"] = self._sensor_rejections.get("baro", 0) + 1
+            return False
+        if innov > 5.0:
+            # Moderate anomaly — inflate R proportionally to reduce trust
+            R *= max(3.0, (innov / 5.0) ** 2)
+        # Baro is the primary altitude source — force-accept (within spike limits)
+        # to prevent Z-axis drift from GPS-only covariance tightening.
         return self.update_external(z, z_pred, H, R, source="baro", force_accept=True)
 
     def update_mag(
@@ -810,7 +823,7 @@ class ESKF:
             vel_norm > self.VEL_FAULT
             or tilt > self.TILT_FAULT_DEG
             or ba_norm > self.ACCEL_BIAS_LIMIT
-            or bg_norm > self.GYRO_BIAS_LIMIT
+            or bg_norm > self.GYRO_BIAS_LIMIT * 1.8  # each axis clipped independently; L2 norm can exceed single-axis limit
             or p_trace > self.P_TRACE_LIMIT
         ):
             self._health = EKFHealth.FAULT
@@ -1005,7 +1018,7 @@ class ESKF:
         R_gps = np.eye(3) * (gps_pos_std**2)
 
         return self.update_external(
-            z, z_pred, H_gps, R_gps, source="gps", force_accept=True
+            z, z_pred, H_gps, R_gps, source="gps", force_accept=force_accept
         )
 
     # ── Reset ──────────────────────────────────────────────────
