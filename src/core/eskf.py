@@ -434,6 +434,7 @@ class ESKF:
         if self._baro_origin is None:
             self._baro_origin = alt_measured
             
+        assert self._baro_origin is not None
         rel_alt = alt_measured - self._baro_origin
         z_pred = np.array([-self.x[2] + self.x[BARO_BIAS_IDX]])
         z = np.array([rel_alt])
