@@ -1,4 +1,4 @@
-name: "🤖 PR Review Bot"
+name: "PR Review Bot"
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
   # Job 1: Lint with flake8
   # ─────────────────────────────────────────────────────────
   lint:
-    name: "🔍 Lint (flake8)"
+    name: "Lint (flake8)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -47,10 +47,10 @@ jobs:
           if [ -s reports/flake8.txt ]; then
             ISSUE_COUNT=$(wc -l < reports/flake8.txt | tr -d ' ')
             echo "issue_count=$ISSUE_COUNT" >> $GITHUB_OUTPUT
-            echo "status=⚠️" >> $GITHUB_OUTPUT
+            echo "status=warning" >> $GITHUB_OUTPUT
           else
             echo "issue_count=0" >> $GITHUB_OUTPUT
-            echo "status=✅" >> $GITHUB_OUTPUT
+            echo "status=pass" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload lint report
@@ -64,7 +64,7 @@ jobs:
   # Job 2: Type check with mypy
   # ─────────────────────────────────────────────────────────
   typecheck:
-    name: "🔠 Type Check (mypy)"
+    name: "Type Check (mypy)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -91,10 +91,10 @@ jobs:
           if [ -s reports/mypy.txt ] && grep -q "error:" reports/mypy.txt; then
             ERROR_COUNT=$(grep -c "error:" reports/mypy.txt || echo "0")
             echo "error_count=$ERROR_COUNT" >> $GITHUB_OUTPUT
-            echo "status=⚠️" >> $GITHUB_OUTPUT
+            echo "status=warning" >> $GITHUB_OUTPUT
           else
             echo "error_count=0" >> $GITHUB_OUTPUT
-            echo "status=✅" >> $GITHUB_OUTPUT
+            echo "status=pass" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload typecheck report
@@ -108,7 +108,7 @@ jobs:
   # Job 3: Run pytest suite
   # ─────────────────────────────────────────────────────────
   test:
-    name: "🧪 Tests (pytest)"
+    name: "Tests (pytest)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -147,16 +147,16 @@ jobs:
             echo "errors=$ERRORS" >> $GITHUB_OUTPUT
             echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
             if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
-              echo "status=✅" >> $GITHUB_OUTPUT
+              echo "status=pass" >> $GITHUB_OUTPUT
             else
-              echo "status=❌" >> $GITHUB_OUTPUT
+              echo "status=fail" >> $GITHUB_OUTPUT
             fi
           else
             echo "tests=0" >> $GITHUB_OUTPUT
             echo "failures=0" >> $GITHUB_OUTPUT
             echo "errors=0" >> $GITHUB_OUTPUT
             echo "skipped=0" >> $GITHUB_OUTPUT
-            echo "status=❌" >> $GITHUB_OUTPUT
+            echo "status=fail" >> $GITHUB_OUTPUT
           fi
 
       - name: Run Jacobian validation tests
@@ -169,11 +169,11 @@ jobs:
             2>&1 | tee reports/jacobians.txt || true
 
           if grep -q "FAILED" reports/jacobians.txt; then
-            echo "status=❌" >> $GITHUB_OUTPUT
+            echo "status=fail" >> $GITHUB_OUTPUT
           elif grep -q "passed" reports/jacobians.txt; then
-            echo "status=✅" >> $GITHUB_OUTPUT
+            echo "status=pass" >> $GITHUB_OUTPUT
           else
-            echo "status=⚠️" >> $GITHUB_OUTPUT
+            echo "status=warning" >> $GITHUB_OUTPUT
           fi
 
       - name: Upload test reports
@@ -190,7 +190,7 @@ jobs:
   # Job 4: Post structured review comment on the PR
   # ─────────────────────────────────────────────────────────
   review-comment:
-    name: "💬 Post Review"
+    name: "Post Review"
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test]
     if: always()

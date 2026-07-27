@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 def parse_flake8(report_path: str) -> dict:
     """Parse flake8 output into structured issues."""
-    result = {"issues": [], "count": 0, "status": "✅"}
+    result = {"issues": [], "count": 0, "status": "PASS"}
 
     path = Path(report_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -31,7 +31,6 @@ def parse_flake8(report_path: str) -> dict:
 
     issues = []
     for line in path.read_text(encoding="utf-8", errors="replace").strip().splitlines():
-        # Format: path:row:col: CODE message
         match = re.match(r"^(.+?):(\d+):(\d+):\s+([\w\d]+)\s+(.+)$", line.strip())
         if match:
             issues.append({
@@ -44,13 +43,13 @@ def parse_flake8(report_path: str) -> dict:
 
     result["issues"] = issues
     result["count"] = len(issues)
-    result["status"] = "✅" if len(issues) == 0 else "⚠️"
+    result["status"] = "PASS" if len(issues) == 0 else "WARNING"
     return result
 
 
 def parse_mypy(report_path: str) -> dict:
     """Parse mypy output into structured errors."""
-    result = {"errors": [], "count": 0, "status": "✅"}
+    result = {"errors": [], "count": 0, "status": "PASS"}
 
     path = Path(report_path)
     if not path.exists() or path.stat().st_size == 0:
@@ -59,7 +58,6 @@ def parse_mypy(report_path: str) -> dict:
     errors = []
     content = path.read_text(encoding="utf-8", errors="replace")
     for line in content.strip().splitlines():
-        # Format: file.py:line: error: message  [code]
         match = re.match(r"^(.+?):(\d+):\s+(error|warning|note):\s+(.+)$", line.strip())
         if match:
             errors.append({
@@ -72,7 +70,7 @@ def parse_mypy(report_path: str) -> dict:
     actual_errors = [e for e in errors if e["level"] == "error"]
     result["errors"] = errors
     result["count"] = len(actual_errors)
-    result["status"] = "✅" if len(actual_errors) == 0 else "⚠️"
+    result["status"] = "PASS" if len(actual_errors) == 0 else "WARNING"
     return result
 
 
@@ -84,18 +82,17 @@ def parse_pytest(report_path: str) -> dict:
         "errors": 0,
         "skipped": 0,
         "total": 0,
-        "status": "✅",
+        "status": "PASS",
         "failures": [],
     }
 
     path = Path(report_path)
     if not path.exists() or path.stat().st_size == 0:
-        result["status"] = "❓"
+        result["status"] = "UNKNOWN"
         return result
 
     content = path.read_text(encoding="utf-8", errors="replace")
 
-    # Parse the summary line: "= X passed, Y failed, Z error ="
     summary_match = re.search(
         r"=+\s*(.*?)\s*=+\s*$", content, re.MULTILINE
     )
@@ -116,31 +113,29 @@ def parse_pytest(report_path: str) -> dict:
         result["errors"] + result["skipped"]
     )
 
-    # Collect FAILED test names
     for match in re.finditer(r"FAILED\s+(.+?)(?:\s+-|$)", content):
         result["failures"].append(match.group(1).strip())
 
     if result["failed"] > 0 or result["errors"] > 0:
-        result["status"] = "❌"
+        result["status"] = "FAIL"
     elif result["total"] == 0:
-        result["status"] = "❓"
+        result["status"] = "UNKNOWN"
 
     return result
 
 
 def parse_jacobians(report_path: str) -> dict:
     """Parse Jacobian validation test output."""
-    result = {"status": "✅", "details": "", "tests": []}
+    result = {"status": "PASS", "details": "", "tests": []}
 
     path = Path(report_path)
     if not path.exists() or path.stat().st_size == 0:
-        result["status"] = "❓"
+        result["status"] = "UNKNOWN"
         result["details"] = "Jacobian tests did not produce output."
         return result
 
     content = path.read_text(encoding="utf-8", errors="replace")
 
-    # Collect individual test results
     for match in re.finditer(
         r"(tests/test_jacobians\.py::.*?)\s+(PASSED|FAILED|ERROR)", content
     ):
@@ -150,13 +145,13 @@ def parse_jacobians(report_path: str) -> dict:
         })
 
     if "FAILED" in content:
-        result["status"] = "❌"
+        result["status"] = "FAIL"
         result["details"] = "One or more Jacobian validation tests failed."
     elif "passed" in content:
-        result["status"] = "✅"
+        result["status"] = "PASS"
         result["details"] = "All analytical Jacobians match numerical finite-difference references."
     else:
-        result["status"] = "⚠️"
+        result["status"] = "WARNING"
         result["details"] = "Could not determine Jacobian test results."
 
     return result
@@ -165,9 +160,9 @@ def parse_jacobians(report_path: str) -> dict:
 def categorize_lint_issues(issues: list) -> dict:
     """Group lint issues by severity category."""
     categories = {
-        "errors": [],      # E9xx syntax errors, F-codes
-        "warnings": [],    # W-codes, E-codes
-        "style": [],       # Formatting
+        "errors": [],
+        "warnings": [],
+        "style": [],
     }
 
     for issue in issues:
@@ -182,6 +177,14 @@ def categorize_lint_issues(issues: list) -> dict:
     return categories
 
 
+STATUS_LABEL = {
+    "PASS": "PASS",
+    "FAIL": "FAIL",
+    "WARNING": "WARNING",
+    "UNKNOWN": "N/A",
+}
+
+
 def generate_comment(
     lint: dict,
     mypy: dict,
@@ -192,9 +195,9 @@ def generate_comment(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     lines = []
-    lines.append("# 🤖 NavCore PR Review Bot")
+    lines.append("# NavCore PR Review Bot")
     lines.append("")
-    lines.append(f"*Automated review generated at {now}*")
+    lines.append(f"*Automated review — {now}*")
     lines.append("")
 
     # ── Summary Table ──────────────────────────────────────
@@ -203,39 +206,38 @@ def generate_comment(
     lines.append("| Check | Status | Details |")
     lines.append("|-------|--------|---------|")
 
-    # Lint
     lint_detail = f"{lint['count']} issue(s)" if lint['count'] > 0 else "Clean"
-    lines.append(f"| 🔍 Lint (flake8) | {lint['status']} | {lint_detail} |")
+    lines.append(f"| Lint (flake8) | **{STATUS_LABEL[lint['status']]}** | {lint_detail} |")
 
-    # Type check
     mypy_detail = f"{mypy['count']} error(s)" if mypy['count'] > 0 else "Clean"
-    lines.append(f"| 🔠 Type Check (mypy) | {mypy['status']} | {mypy_detail} |")
+    lines.append(f"| Type Check (mypy) | **{STATUS_LABEL[mypy['status']]}** | {mypy_detail} |")
 
-    # Tests
     test_detail = (
         f"{pytest_result['passed']} passed, "
         f"{pytest_result['failed']} failed, "
         f"{pytest_result['skipped']} skipped"
     )
-    lines.append(f"| 🧪 Tests (pytest) | {pytest_result['status']} | {test_detail} |")
+    lines.append(f"| Tests (pytest) | **{STATUS_LABEL[pytest_result['status']]}** | {test_detail} |")
 
-    # Jacobians
-    lines.append(f"| 📐 Jacobian Validation | {jacobians['status']} | {jacobians['details'][:80]} |")
+    lines.append(
+        f"| Jacobian Validation | **{STATUS_LABEL[jacobians['status']]}** | "
+        f"{jacobians['details'][:80]} |"
+    )
 
     lines.append("")
 
     # ── Overall Verdict ────────────────────────────────────
     all_pass = all(
-        s["status"] == "✅"
+        s["status"] == "PASS"
         for s in [lint, mypy, pytest_result, jacobians]
     )
 
     if all_pass:
-        lines.append("> ✅ **All checks passed.** This PR looks good to merge.")
-    elif pytest_result["status"] == "❌" or jacobians["status"] == "❌":
-        lines.append("> ❌ **Tests are failing.** Please fix the issues below before merging.")
+        lines.append("> **Result: All checks passed.** This PR is ready for review.")
+    elif pytest_result["status"] == "FAIL" or jacobians["status"] == "FAIL":
+        lines.append("> **Result: Tests are failing.** Please address the failures below before merging.")
     else:
-        lines.append("> ⚠️ **Some checks have warnings.** Review the details below.")
+        lines.append("> **Result: Some checks have warnings.** See details below.")
 
     lines.append("")
 
@@ -243,13 +245,13 @@ def generate_comment(
     if lint["count"] > 0:
         lines.append("---")
         lines.append("")
-        lines.append("## 🔍 Lint Issues")
+        lines.append("## Lint Issues")
         lines.append("")
 
         categories = categorize_lint_issues(lint["issues"])
 
         if categories["errors"]:
-            lines.append("### ❌ Errors (must fix)")
+            lines.append("### Errors (must fix)")
             lines.append("")
             lines.append("| File | Line | Code | Message |")
             lines.append("|------|------|------|---------|")
@@ -261,7 +263,7 @@ def generate_comment(
             lines.append("")
 
         if categories["warnings"]:
-            lines.append(f"### ⚠️ Warnings ({len(categories['warnings'])} total)")
+            lines.append(f"### Warnings ({len(categories['warnings'])} total)")
             lines.append("")
             lines.append("<details>")
             lines.append("<summary>Click to expand</summary>")
@@ -283,7 +285,7 @@ def generate_comment(
             lines.append("")
 
         if categories["style"]:
-            lines.append(f"### 💅 Style ({len(categories['style'])} total)")
+            lines.append(f"### Style ({len(categories['style'])} total)")
             lines.append("")
             lines.append("<details>")
             lines.append("<summary>Click to expand</summary>")
@@ -303,17 +305,14 @@ def generate_comment(
     if mypy["count"] > 0:
         lines.append("---")
         lines.append("")
-        lines.append("## 🔠 Type Check Issues")
+        lines.append("## Type Check Issues")
         lines.append("")
         lines.append("| File | Line | Level | Message |")
         lines.append("|------|------|-------|---------|")
         for err in mypy["errors"][:20]:
-            level_icon = {"error": "❌", "warning": "⚠️", "note": "ℹ️"}.get(
-                err["level"], "❓"
-            )
             lines.append(
                 f"| `{err['file']}` | {err['line']} | "
-                f"{level_icon} {err['level']} | {err['message']} |"
+                f"{err['level']} | {err['message']} |"
             )
         lines.append("")
 
@@ -321,32 +320,28 @@ def generate_comment(
     if pytest_result["failed"] > 0 or pytest_result["errors"] > 0:
         lines.append("---")
         lines.append("")
-        lines.append("## 🧪 Test Failures")
+        lines.append("## Test Failures")
         lines.append("")
         for failure in pytest_result["failures"][:10]:
-            lines.append(f"- ❌ `{failure}`")
+            lines.append(f"- `{failure}`")
         lines.append("")
 
     # ── Jacobian Details ───────────────────────────────────
     if jacobians["tests"]:
         lines.append("---")
         lines.append("")
-        lines.append("## 📐 Jacobian Validation Details")
+        lines.append("## Jacobian Validation Details")
         lines.append("")
-        lines.append("| Test | Status |")
+        lines.append("| Test | Result |")
         lines.append("|------|--------|")
         for test in jacobians["tests"]:
-            icon = {"PASSED": "✅", "FAILED": "❌", "ERROR": "💥"}.get(
-                test["status"], "❓"
-            )
-            # Shorten test name
             name = test["name"].replace("tests/test_jacobians.py::", "")
-            lines.append(f"| `{name}` | {icon} {test['status']} |")
+            lines.append(f"| `{name}` | {test['status']} |")
         lines.append("")
 
-        if jacobians["status"] == "✅":
+        if jacobians["status"] == "PASS":
             lines.append(
-                "> 📐 All analytical Jacobians match their numerical "
+                "> All analytical Jacobians match their numerical "
                 "finite-difference counterparts within tolerance. "
                 "The sensor update math is verified."
             )
@@ -356,7 +351,7 @@ def generate_comment(
     lines.append("---")
     lines.append("")
     lines.append(
-        "*🤖 Generated by [NavCore PR Review Bot]"
+        "*Generated by [NavCore PR Review Bot]"
         "(https://github.com/ARYA-mgc/NavCore-Pixhawk/blob/main/"
         ".github/workflows/pr-review.yml) — "
         "runs on every PR targeting `src/`, `tests/`, or `scripts/`.*"
@@ -391,16 +386,13 @@ def main():
     )
     args = parser.parse_args()
 
-    # Parse all reports
     lint = parse_flake8(args.lint_report)
     mypy = parse_mypy(args.mypy_report)
     pytest_result = parse_pytest(args.pytest_report)
     jacobians = parse_jacobians(args.jacobian_report)
 
-    # Generate comment
     comment = generate_comment(lint, mypy, pytest_result, jacobians)
 
-    # Write output
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(comment, encoding="utf-8")
@@ -411,8 +403,7 @@ def main():
     print(f"  Tests: {pytest_result['status']} ({pytest_result['passed']} passed, {pytest_result['failed']} failed)")
     print(f"  Jacobians: {jacobians['status']}")
 
-    # Exit with non-zero if critical failures
-    if pytest_result["status"] == "❌":
+    if pytest_result["status"] == "FAIL":
         sys.exit(1)
     sys.exit(0)
 
