@@ -15,13 +15,15 @@ venv/
 logs/*.csv
 logs/*.log
 logs/*.txt
-logs/*.jsonl
 !logs/.gitkeep
 
 # IDE
 .vscode/
 .idea/
 *.swp
+
+# CI reports
+reports/
 
 # OS
 .DS_Store

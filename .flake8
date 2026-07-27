@@ -1,0 +1,39 @@
+[flake8]
+max-line-length = 120
+max-complexity = 15
+
+# Ignore rules that conflict with numpy-heavy scientific code:
+# E501 - line too long (handled by max-line-length=120, but some formulas are longer)
+# W503 - line break before binary operator (PEP 8 now prefers this)
+# E226 - missing whitespace around arithmetic operator (dense math expressions)
+# E241 - multiple spaces after ',' (alignment in matrix definitions)
+# E302 - expected 2 blank lines (sometimes 1 is fine inside classes)
+# W504 - line break after binary operator
+extend-ignore = W503, W504
+
+# Per-file ignores for specific patterns
+per-file-ignores =
+    # ESKF core has dense matrix math — allow longer lines and tight spacing
+    src/core/eskf.py: E501, E226, E241
+    src/core/m.py: E501, E226, E241
+    src/core/eskf_sqrt.py: E501, E226, E241
+    # Test files can have longer lines for assertions
+    tests/*: E501
+    # Scripts are more relaxed
+    scripts/*: E501
+
+exclude =
+    __pycache__,
+    .git,
+    .eggs,
+    *.egg-info,
+    build,
+    dist,
+    venv,
+    .venv,
+    ins-venv,
+    .github
+
+# Statistics
+statistics = true
+count = true
