@@ -22,6 +22,9 @@ logs/*.txt
 .idea/
 *.swp
 
+# CI reports
+reports/
+
 # OS
 .DS_Store
 Thumbs.db

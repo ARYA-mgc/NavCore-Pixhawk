@@ -107,10 +107,11 @@ class TestJacobianValidation:
         # Check velocity Jacobian
         np.testing.assert_allclose(H_num[:, 3:6], H_ana[:, 3:6], atol=1e-5)
         
-        # Note: we neglected the attitude Jacobian H_flow[:, 6:9] in the analytical code!
-        # The numerical Jacobian will show it's non-zero!
-        # delta v_body = R^T [v_ned]x R delta_theta
-        # If the user wants exact math, we should add the attitude Jacobian to eskf.py!
+        # Check attitude Jacobian
+        # delta v_body = -[v_body]x delta_theta
+        v_body_pred = R_dcm.T @ eskf.x[3:6]
+        H_ana[:, 6:9] = eskf._skew(v_body_pred)[0:2, :]
+        np.testing.assert_allclose(H_num[:, 6:9], H_ana[:, 6:9], atol=1e-3)
 
     def test_radar_jacobian(self, eskf):
         def h_func(dx):
@@ -130,9 +131,12 @@ class TestJacobianValidation:
         
         R_dcm = eskf._quat_to_dcm(eskf.x[6:10])
         H_ana = np.zeros((3, 20))
+        v_body_pred = R_dcm.T @ eskf.x[3:6]
         H_ana[:, 3:6] = R_dcm.T
+        H_ana[:, 6:9] = eskf._skew(v_body_pred)
         
         np.testing.assert_allclose(H_num[:, 3:6], H_ana[:, 3:6], atol=1e-5)
+        np.testing.assert_allclose(H_num[:, 6:9], H_ana[:, 6:9], atol=1e-3)
 
     def test_lidar_jacobian(self, eskf):
         def h_func(dx):
@@ -155,5 +159,9 @@ class TestJacobianValidation:
         cos_tilt = R_dcm[2, 2]
         H_ana = np.zeros((1, 20))
         H_ana[0, 2] = -1.0 / cos_tilt
+        pos_z = eskf.x[2]
+        H_ana[0, 6] = -(pos_z / (cos_tilt**2)) * R_dcm[2, 1]
+        H_ana[0, 7] = (pos_z / (cos_tilt**2)) * R_dcm[2, 0]
         
         np.testing.assert_allclose(H_num[:, 0:3], H_ana[:, 0:3], atol=1e-5)
+        np.testing.assert_allclose(H_num[:, 6:9], H_ana[:, 6:9], atol=1e-3)

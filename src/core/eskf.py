@@ -520,18 +520,17 @@ class ESKF:
                 R *= 10.0
 
         # Innovation gating
-        H = np.zeros((1, ERROR_DIM))
+        H_mag_dyn = np.zeros((1, ERROR_DIM))
         # Jacobian of Euler yaw w.r.t body-frame angle error
         cos_theta = math.cos(theta)
-        if abs(cos_theta) > 1e-3:
-            H[0, 6] = 0.0
-            H[0, 7] = math.sin(phi) / cos_theta
-            H[0, 8] = math.cos(phi) / cos_theta
+        if abs(cos_theta) > 1e-4:
+            H_mag_dyn[0, 7] = math.sin(phi) / cos_theta
+            H_mag_dyn[0, 8] = math.cos(phi) / cos_theta
         else:
-            H[0, 8] = 1.0  # Gimbal lock fallback
+            H_mag_dyn[0, 8] = 1.0  # Gimbal lock fallback
         
         P = self.P
-        S = H @ P @ H.T + R
+        S = H_mag_dyn @ P @ H_mag_dyn.T + R
         c_and_lower = la.cho_factor(S)
         nis = float(y @ la.cho_solve(c_and_lower, y))
 
@@ -539,12 +538,12 @@ class ESKF:
             log.debug(f"Mag rejected (NIS): NIS={nis:.2f}")
             return
 
-        K = P @ H.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
+        K = P @ H_mag_dyn.T @ la.cho_solve(c_and_lower, np.eye(len(S)))
         dx = (K @ y).flatten()
         self._inject_error(dx)
 
         # Joseph form covariance update + Re-Cholesky
-        I_KH = np.eye(ERROR_DIM) - K @ H
+        I_KH = np.eye(ERROR_DIM) - K @ H_mag_dyn
         P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
         self.U = np.linalg.cholesky(P_new + np.eye(ERROR_DIM)*1e-12).T
 
@@ -591,6 +590,7 @@ class ESKF:
         # Predicted velocity in body frame
         v_ned = self.x[VEL]
         v_body_pred = R_dcm.T @ v_ned
+        H_flow[:, 6:9] = self._skew(v_body_pred)[0:2, :]
         
         
         z = np.array([flow_vx, flow_vy])
@@ -641,12 +641,14 @@ class ESKF:
         R_dcm = self._quat_to_dcm(self.x[QUAT])
         
         H_radar = np.zeros((3, ERROR_DIM))
+        v_body_pred = R_dcm.T @ self.x[VEL]
         H_radar[:, 3:6] = R_dcm.T  # Map NED velocity error to body frame measurement
+        H_radar[:, 6:9] = self._skew(v_body_pred)
 
         R_radar = np.eye(3) * (0.1 ** 2) / weight
 
         z = np.array([vx, vy, vz])
-        z_pred = R_dcm.T @ self.x[VEL]
+        z_pred = v_body_pred
 
         self.update_external(z, z_pred, H_radar, R_radar, source="radar")
 
@@ -672,6 +674,9 @@ class ESKF:
         H_lidar = np.zeros((1, ERROR_DIM))
         # z = -pos_z / cos_tilt -> dz/dpos_z = -1.0 / cos_tilt
         H_lidar[0, 2] = -1.0 / cos_tilt  
+        pos_z = self.x[2]
+        H_lidar[0, 6] = -(pos_z / (cos_tilt**2)) * R_dcm[2, 1]
+        H_lidar[0, 7] = (pos_z / (cos_tilt**2)) * R_dcm[2, 0]
 
         R_lidar = np.array([[0.05 ** 2]]) / weight
 

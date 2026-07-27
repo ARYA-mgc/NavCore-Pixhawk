@@ -594,10 +594,14 @@ class INSNavSys:
 
                 if dt_flow > 0:
                     # Step 3: angular_rate × height = ground velocity. High school physics saves the day.
-                    vx = (flow_vx / dt_flow) * msg.distance
-                    vy = (flow_vy / dt_flow) * msg.distance
+                    # Use the Kalman-filtered distance instead of raw sonar/lidar range
+                    R_dcm = self.mht.primary._quat_to_dcm(self.mht.primary.x[6:10])
+                    est_distance = -self.mht.primary.x[2] / max(R_dcm[2,2], 0.1)
+                    
+                    vx = (flow_vx / dt_flow) * est_distance
+                    vy = (flow_vy / dt_flow) * est_distance
                     self.mht.update_optical_flow(
-                        vx, vy, msg.distance, msg.quality,
+                        vx, vy, est_distance, msg.quality,
                         enable_rot_comp=use_raw_flow)
 
         elif mtype == "VISION_POSITION_ESTIMATE":
