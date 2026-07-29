@@ -40,7 +40,11 @@ class INSLogger:
         udp_host: str = None,  # type: ignore
         udp_port: int = 14550,
     ):
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Ensure directory exists if a directory component is present
+        dirname = os.path.dirname(filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
+
         self._f = open(filepath, "w", newline="")
         self._csv = csv.writer(self._f)
         self._csv.writerow(self.HEADER)
